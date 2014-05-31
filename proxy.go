@@ -1,4 +1,4 @@
-package httpconn
+package enproxy
 
 import (
 	"fmt"
@@ -12,6 +12,10 @@ import (
 
 const (
 	BAD_GATEWAY = 502
+)
+
+var (
+	emptyBuffer = []byte{}
 )
 
 // Proxy is the server side to an http.Conn, handling incoming requests from
@@ -52,7 +56,8 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	// Read request
 	_, err = io.Copy(connOut, req.Body)
 	if err != nil && err != io.EOF {
-		log.Printf("Unexpected error reading from client: %s", err)
+		resp.WriteHeader(BAD_GATEWAY)
+		resp.Write([]byte(err.Error()))
 		connOut.Close()
 	}
 
@@ -67,10 +72,13 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 		readDeadline := time.Now().Add(idleInterval)
 		connOut.SetReadDeadline(readDeadline)
 		n, readErr := connOut.Read(b)
+		if readErr == io.EOF {
+			// Reached EOF
+			resp.Header().Set(X_HTTPCONN_EOF, "true")
+		}
 		if n > 0 {
 			_, writeErr := resp.Write(b[:n])
 			if writeErr != nil {
-				log.Printf("Unexpected error writing to client: %s", writeErr)
 				connOut.Close()
 				return
 			}
@@ -83,9 +91,6 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 					return
 				}
 			default:
-				if readErr != io.EOF {
-					log.Printf("Unexpected error reading from connOut: %s", readErr)
-				}
 				connOut.Close()
 				return
 			}
@@ -118,56 +123,6 @@ func (p *Proxy) connOutFor(req *http.Request) (connOut *idleTimingConn, err erro
 		p.connsOut[id] = connOut
 	}
 	return
-}
-
-type idleTimingConn struct {
-	conn             net.Conn
-	idleTimeout      time.Duration
-	lastActivityTime time.Time
-}
-
-func newIdleTimingConn(conn net.Conn, idleTimeout time.Duration) *idleTimingConn {
-	c := &idleTimingConn{
-		conn:             conn,
-		idleTimeout:      idleTimeout,
-		lastActivityTime: time.Now(),
-	}
-	go func() {
-		for {
-			time.Sleep(idleTimeout)
-			if c.closeIfNecessary() {
-				log.Println("Closed idle connection")
-				return
-			}
-		}
-	}()
-	return c
-}
-
-func (c *idleTimingConn) Read(b []byte) (int, error) {
-	c.lastActivityTime = time.Now()
-	return c.conn.Read(b)
-}
-
-func (c *idleTimingConn) Write(b []byte) (int, error) {
-	c.lastActivityTime = time.Now()
-	return c.conn.Write(b)
-}
-
-func (c *idleTimingConn) SetReadDeadline(deadline time.Time) error {
-	return c.conn.SetReadDeadline(deadline)
-}
-
-func (c *idleTimingConn) Close() error {
-	return c.conn.Close()
-}
-
-func (c *idleTimingConn) closeIfNecessary() bool {
-	if time.Now().Sub(c.lastActivityTime) > c.idleTimeout {
-		c.Close()
-		return true
-	}
-	return false
 }
 
 func BadGateway(w io.Writer, msg string) {

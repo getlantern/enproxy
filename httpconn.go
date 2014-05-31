@@ -1,7 +1,8 @@
-package httpconn
+package enproxy
 
 import (
 	"io"
+	"log"
 	"net"
 	"sync"
 	"time"
@@ -142,4 +143,54 @@ func (c *baseConn) isClosed() bool {
 	c.closedMutex.RLock()
 	defer c.closedMutex.RUnlock()
 	return c.closed
+}
+
+type idleTimingConn struct {
+	conn             net.Conn
+	idleTimeout      time.Duration
+	lastActivityTime time.Time
+}
+
+func newIdleTimingConn(conn net.Conn, idleTimeout time.Duration) *idleTimingConn {
+	c := &idleTimingConn{
+		conn:             conn,
+		idleTimeout:      idleTimeout,
+		lastActivityTime: time.Now(),
+	}
+	go func() {
+		for {
+			time.Sleep(idleTimeout)
+			if c.closeIfNecessary() {
+				return
+			}
+		}
+	}()
+	return c
+}
+
+func (c *idleTimingConn) Read(b []byte) (int, error) {
+	c.lastActivityTime = time.Now()
+	return c.conn.Read(b)
+}
+
+func (c *idleTimingConn) Write(b []byte) (int, error) {
+	c.lastActivityTime = time.Now()
+	return c.conn.Write(b)
+}
+
+func (c *idleTimingConn) SetReadDeadline(deadline time.Time) error {
+	return c.conn.SetReadDeadline(deadline)
+}
+
+func (c *idleTimingConn) Close() error {
+	return c.conn.Close()
+}
+
+func (c *idleTimingConn) closeIfNecessary() bool {
+	if time.Now().Sub(c.lastActivityTime) > c.idleTimeout {
+		log.Println("Closing idle conn")
+		c.Close()
+		return true
+	}
+	return false
 }
