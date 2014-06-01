@@ -91,7 +91,6 @@ func (c *Client) handleIncomingConn(conn net.Conn) {
 	for {
 		req, err := http.ReadRequest(reader)
 		if err != nil {
-			log.Printf("Error reading request: %s", err)
 			return
 		}
 		ctx := &requestContext{

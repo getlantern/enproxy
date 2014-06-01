@@ -9,8 +9,8 @@ import (
 )
 
 func main() {
-	proxy := enproxy.NewServer(0, 0)
-	err := proxy.ListenAndServe(os.Args[1])
+	server := enproxy.NewServer(0, 0)
+	err := server.ListenAndServe(os.Args[1])
 	if err != nil {
 		log.Fatalf("Unable to listen and serve: %s", err)
 	}
