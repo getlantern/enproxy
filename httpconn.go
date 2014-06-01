@@ -86,3 +86,14 @@ func OK(w io.Writer) {
 	}
 	resp.Write(w)
 }
+
+func BadGateway(w io.Writer, msg string) {
+	log.Printf("Sending BadGateway: %s", msg)
+	resp := &http.Response{
+		StatusCode: 502,
+		ProtoMajor: 1,
+		ProtoMinor: 1,
+		Body:       &closeableStringReader{strings.NewReader(msg)},
+	}
+	resp.Write(w)
+}
