@@ -71,7 +71,6 @@ func (c *idleTimingConn) Close() error {
 
 func (c *idleTimingConn) closeIfNecessary() bool {
 	if time.Now().Sub(c.lastActivityTime) > c.idleTimeout {
-		log.Println("Closing idle conn")
 		c.Close()
 		return true
 	}
@@ -96,4 +95,12 @@ func BadGateway(w io.Writer, msg string) {
 		Body:       &closeableStringReader{strings.NewReader(msg)},
 	}
 	resp.Write(w)
+}
+
+type closeableStringReader struct {
+	*strings.Reader
+}
+
+func (r *closeableStringReader) Close() error {
+	return nil
 }

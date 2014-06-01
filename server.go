@@ -5,43 +5,60 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"strings"
 	"time"
 )
 
 const (
-	BAD_GATEWAY = 502
+	BAD_GATEWAY         = 502
+	DEFAULT_BUFFER_SIZE = 8096
 )
 
-// Proxy is the server side to an http.Conn, handling incoming requests from
-// the http.Conn.
-type Proxy struct {
-	// IdleInterval: how long to wait for the next write before finishing the
-	// current HTTP response to the client
+// Server is the server side to an enproxy.Client.  Server impleents the
+// http.Hander interface for plugging into an HTTP server, and it also provides
+// a convenience ListenAndServe() function for quickly starting up a dedicated
+// HTTP server using this Server as its handler.
+type Server struct {
 	idleInterval time.Duration
 
 	connsOut map[string]*idleTimingConn // map of outbound connections by their id
+
+	bufferSize int
 }
 
-func NewProxy(idleInterval time.Duration) *Proxy {
-	return &Proxy{
+// NewServer sets up a new server.
+//
+// idleInterval controls how long to wait for the next write before finishing
+// the current HTTP response to the client.
+//
+// bufferSize controls the size of the buffers used for copying data from
+// outbound to inbound connection.  If given as 0, defaults to
+// DEFAULT_BUFFER_SIZE bytes.
+func NewServer(idleInterval time.Duration, bufferSize int) *Server {
+	if bufferSize == 0 {
+		bufferSize = DEFAULT_BUFFER_SIZE
+	}
+	return &Server{
 		idleInterval: idleInterval,
 		connsOut:     make(map[string]*idleTimingConn),
+		bufferSize:   bufferSize,
 	}
 }
 
-func (p *Proxy) ListenAndServe(addr string) error {
+// ListenAndServe: convenience function for quickly starting up a dedicated HTTP
+// server using this Server as its handler.
+func (s *Server) ListenAndServe(addr string) error {
 	httpServer := &http.Server{
 		Addr:         addr,
-		Handler:      p,
+		Handler:      s,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 	}
 	return httpServer.ListenAndServe()
 }
 
-func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
-	connOut, err := p.connOutFor(req)
+// ServeHTTP: implements function from http.Handler.
+func (s *Server) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
+	connOut, err := s.connOutFor(req)
 	if err != nil {
 		resp.WriteHeader(BAD_GATEWAY)
 		resp.Write([]byte(err.Error()))
@@ -57,10 +74,9 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	}
 
 	// Write response
-	// TODO: pool buffers and make buffer size tunable
-	b := make([]byte, 8096)
+	b := make([]byte, s.bufferSize)
 	for {
-		idleInterval := p.idleInterval
+		idleInterval := s.idleInterval
 		if idleInterval == 0 {
 			idleInterval = defaultIdleInterval
 		}
@@ -93,13 +109,13 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func (p *Proxy) connOutFor(req *http.Request) (connOut *idleTimingConn, err error) {
+func (s *Server) connOutFor(req *http.Request) (connOut *idleTimingConn, err error) {
 	id := req.Header.Get(X_HTTPCONN_ID)
 	if id == "" {
 		return nil, fmt.Errorf("No id found in header %s", X_HTTPCONN_ID)
 	}
 
-	connOut = p.connsOut[id]
+	connOut = s.connsOut[id]
 	if connOut == nil {
 		// Connect to destination
 		addr := req.Header.Get(X_HTTPCONN_DEST_ADDR)
@@ -115,15 +131,7 @@ func (p *Proxy) connOutFor(req *http.Request) (connOut *idleTimingConn, err erro
 		}
 
 		connOut = newIdleTimingConn(conn, defaultIdleTimeout)
-		p.connsOut[id] = connOut
+		s.connsOut[id] = connOut
 	}
 	return
-}
-
-type closeableStringReader struct {
-	*strings.Reader
-}
-
-func (r *closeableStringReader) Close() error {
-	return nil
 }
