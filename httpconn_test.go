@@ -14,17 +14,18 @@ import (
 )
 
 const (
-	PROXY_ADDR    = "localhost:13091"
+	CLIENT_ADDR   = "localhost:13090"
+	SERVER_ADDR   = "localhost:13091"
 	EXPECTED_TEXT = "Google is built by a large team of engineers, designers, researchers, robots, and others in many different sites across the globe. It is updated continuously, and built with more tools and technologies than we can shake a stick at. If you'd like to help us out, see google.com/careers."
 	HR            = "----------------------------"
 )
 
 var (
-	proxyStarted = false
+	serversStarted = false
 )
 
 func TestPlainText(t *testing.T) {
-	startProxy(t)
+	startServers(t)
 
 	conn := prepareConn(80, t)
 	defer conn.Close()
@@ -33,7 +34,7 @@ func TestPlainText(t *testing.T) {
 }
 
 func TestTLS(t *testing.T) {
-	startProxy(t)
+	startServers(t)
 
 	conn := prepareConn(443, t)
 
@@ -111,8 +112,8 @@ func readResponse(conn net.Conn, req *http.Request, t *testing.T) {
 	}
 }
 
-func startProxy(t *testing.T) {
-	if proxyStarted {
+func startServers(t *testing.T) {
+	if serversStarted {
 		return
 	}
 	go func() {
