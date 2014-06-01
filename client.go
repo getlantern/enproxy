@@ -46,11 +46,29 @@ type Client struct {
 	// HttpClient: client used to send encapsulated HTTP requests
 	HttpClient *http.Client
 
+	// IdleInterval: how long to wait for a read to complete before switching to
+	// writing
+	IdleInterval time.Duration
+
+	// PollInterval: how long to wait before sending an empty request to server
+	// to poll for data.
+	PollInterval time.Duration
+
 	// IdleTimeout: how long to wait before closing an idle inbound connection
 	IdleTimeout time.Duration
 }
 
 func (c *Client) ListenAndServe(addr string) error {
+	if c.IdleInterval == 0 {
+		c.IdleInterval = defaultIdleInterval
+	}
+	if c.PollInterval == 0 {
+		c.PollInterval = defaultPollInterval
+	}
+	if c.IdleTimeout == 0 {
+		c.IdleTimeout = defaultIdleTimeout
+	}
+
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
@@ -66,12 +84,12 @@ func (c *Client) ListenAndServe(addr string) error {
 }
 
 func (c *Client) handleConn(conn net.Conn) {
-	defer conn.Close()
-
 	// Add idle timing to conn
-	connIn := newIdleTimingConn(conn, defaultIdleTimeout)
+	connIn := newIdleTimingConn(conn, c.IdleTimeout)
 	// Set up a buffered reader
 	reader := bufio.NewReader(connIn)
+
+	defer connIn.Close()
 
 	// Set up a globally unique connection id
 	connId := uuid.NewRandom().String()
@@ -135,8 +153,8 @@ func (c *Client) handleRequest(connIn *idleTimingConn, reader *bufio.Reader, con
 		ireader := &impatientReadCloser{
 			orig:        connIn,
 			reader:      reader,
-			idleTimeout: defaultIdleInterval,
-			maxIdleTime: defaultPollInterval,
+			idleTimeout: c.IdleInterval,
+			maxIdleTime: c.PollInterval,
 			startTime:   time.Now(),
 		}
 		reqOut, err = c.buildRequestOut(connId, addr, ireader)

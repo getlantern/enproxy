@@ -151,6 +151,7 @@ type idleTimingConn struct {
 	conn             net.Conn
 	idleTimeout      time.Duration
 	lastActivityTime time.Time
+	closed           chan bool
 }
 
 func newIdleTimingConn(conn net.Conn, idleTimeout time.Duration) *idleTimingConn {
@@ -158,11 +159,16 @@ func newIdleTimingConn(conn net.Conn, idleTimeout time.Duration) *idleTimingConn
 		conn:             conn,
 		idleTimeout:      idleTimeout,
 		lastActivityTime: time.Now(),
+		closed:           make(chan bool, 10),
 	}
 	go func() {
 		for {
-			time.Sleep(idleTimeout)
-			if c.closeIfNecessary() {
+			select {
+			case <-time.After(idleTimeout):
+				if c.closeIfNecessary() {
+					return
+				}
+			case <-c.closed:
 				return
 			}
 		}
@@ -185,6 +191,7 @@ func (c *idleTimingConn) SetReadDeadline(deadline time.Time) error {
 }
 
 func (c *idleTimingConn) Close() error {
+	c.closed <- true
 	return c.conn.Close()
 }
 
