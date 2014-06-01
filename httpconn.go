@@ -17,10 +17,9 @@ const (
 )
 
 var (
-	defaultPollInterval    = 50 * time.Millisecond
-	defaultIdleInterval    = 5 * time.Millisecond
-	firstWriteIdleInterval = 1000 * time.Hour // just needs to be a really large value
-	defaultIdleTimeout     = 10 * time.Second
+	defaultPollInterval = 50 * time.Millisecond
+	defaultIdleInterval = 5 * time.Millisecond
+	defaultIdleTimeout  = 10 * time.Second
 )
 
 type dialFunc func(addr string) (net.Conn, error)
