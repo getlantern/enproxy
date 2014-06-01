@@ -13,10 +13,6 @@ const (
 	BAD_GATEWAY = 502
 )
 
-var (
-	emptyBuffer = []byte{}
-)
-
 // Proxy is the server side to an http.Conn, handling incoming requests from
 // the http.Conn.
 type Proxy struct {
