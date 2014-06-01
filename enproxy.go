@@ -21,6 +21,8 @@ var (
 	defaultIdleTimeout  = 10 * time.Second
 )
 
+// idleTimingConn is a connection that times out if idle for more than
+// idleTimeout.
 type idleTimingConn struct {
 	conn             net.Conn
 	idleTimeout      time.Duration
@@ -29,7 +31,15 @@ type idleTimingConn struct {
 	closed           chan bool
 }
 
-func newIdleTimingConn(conn net.Conn, checkBytes bool, idleTimeout time.Duration) *idleTimingConn {
+// newIdleTimingConn creates a new idleTimingConn.
+//
+// idleTimeout specifies how long to wait for inactivity before considering
+// connection idle.
+//
+// checkBytes specifies whether or not there must actually be bytes written/read
+// to consider connection idle, or if it's enough simply to have read/write
+// called.
+func newIdleTimingConn(conn net.Conn, idleTimeout time.Duration, checkBytes bool) *idleTimingConn {
 	c := &idleTimingConn{
 		conn:             conn,
 		idleTimeout:      idleTimeout,

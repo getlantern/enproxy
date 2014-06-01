@@ -83,7 +83,7 @@ func (c *Client) defaultTimeouts() {
 // encountered.
 func (c *Client) handleIncomingConn(conn net.Conn) {
 	// Add idle timing to conn
-	connIn := newIdleTimingConn(conn, c.IdleTimeout)
+	connIn := newIdleTimingConn(conn, c.IdleTimeout, true)
 	// Set up a buffered reader
 	reader := bufio.NewReader(connIn)
 
