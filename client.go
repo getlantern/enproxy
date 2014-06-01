@@ -150,7 +150,7 @@ func (c *Client) handleRequest(connIn *idleTimingConn, reader *bufio.Reader, con
 
 	for {
 		// Still have more data to process
-		ireader := &impatientReadCloser{
+		ireader := &impatientIn{
 			orig:        connIn,
 			reader:      reader,
 			idleTimeout: c.IdleInterval,
@@ -207,7 +207,7 @@ func copyResponse(connIn *idleTimingConn, respOut *http.Response) (moreToRead bo
 	return
 }
 
-type impatientReadCloser struct {
+type impatientIn struct {
 	orig        *idleTimingConn
 	reader      *bufio.Reader
 	idleTimeout time.Duration
@@ -217,7 +217,7 @@ type impatientReadCloser struct {
 	startTime   time.Time
 }
 
-func (r *impatientReadCloser) Read(b []byte) (n int, err error) {
+func (r *impatientIn) Read(b []byte) (n int, err error) {
 	deadline := time.Now().Add(r.idleTimeout)
 	r.orig.SetReadDeadline(deadline)
 	n, err = r.reader.Read(b)
@@ -247,6 +247,6 @@ func (r *impatientReadCloser) Read(b []byte) (n int, err error) {
 
 // Close implements Close() from io.Closer.  It does nothing, leaving the
 // underlying connection open.
-func (r *impatientReadCloser) Close() error {
+func (r *impatientIn) Close() error {
 	return nil
 }
