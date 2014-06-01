@@ -24,14 +24,16 @@ var (
 type idleTimingConn struct {
 	conn             net.Conn
 	idleTimeout      time.Duration
+	checkBytes       bool
 	lastActivityTime time.Time
 	closed           chan bool
 }
 
-func newIdleTimingConn(conn net.Conn, idleTimeout time.Duration) *idleTimingConn {
+func newIdleTimingConn(conn net.Conn, checkBytes bool, idleTimeout time.Duration) *idleTimingConn {
 	c := &idleTimingConn{
 		conn:             conn,
 		idleTimeout:      idleTimeout,
+		checkBytes:       checkBytes,
 		lastActivityTime: time.Now(),
 		closed:           make(chan bool, 10),
 	}
@@ -52,7 +54,7 @@ func newIdleTimingConn(conn net.Conn, idleTimeout time.Duration) *idleTimingConn
 
 func (c *idleTimingConn) Read(b []byte) (int, error) {
 	n, err := c.conn.Read(b)
-	if n > 0 {
+	if !c.checkBytes || n > 0 {
 		c.lastActivityTime = time.Now()
 	}
 	return n, err
@@ -60,7 +62,7 @@ func (c *idleTimingConn) Read(b []byte) (int, error) {
 
 func (c *idleTimingConn) Write(b []byte) (int, error) {
 	n, err := c.conn.Write(b)
-	if n > 0 {
+	if !c.checkBytes || n > 0 {
 		c.lastActivityTime = time.Now()
 	}
 	return n, err
