@@ -1,3 +1,6 @@
+// enproxy provides a chained HTTP proxy (client+server) that encapsulates
+// traffic inside the bodies of HTTP requests and responses.  This is useful for
+// tunneling traffic across reverse proxies and CDNs.
 package enproxy
 
 import (

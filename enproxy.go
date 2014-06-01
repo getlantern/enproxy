@@ -51,13 +51,19 @@ func newIdleTimingConn(conn net.Conn, idleTimeout time.Duration) *idleTimingConn
 }
 
 func (c *idleTimingConn) Read(b []byte) (int, error) {
-	c.lastActivityTime = time.Now()
-	return c.conn.Read(b)
+	n, err := c.conn.Read(b)
+	if n > 0 {
+		c.lastActivityTime = time.Now()
+	}
+	return n, err
 }
 
 func (c *idleTimingConn) Write(b []byte) (int, error) {
-	c.lastActivityTime = time.Now()
-	return c.conn.Write(b)
+	n, err := c.conn.Write(b)
+	if n > 0 {
+		c.lastActivityTime = time.Now()
+	}
+	return n, err
 }
 
 func (c *idleTimingConn) SetReadDeadline(deadline time.Time) error {
