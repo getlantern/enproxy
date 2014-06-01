@@ -3,7 +3,6 @@ package enproxy
 import (
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -123,17 +122,6 @@ func (p *Proxy) connOutFor(req *http.Request) (connOut *idleTimingConn, err erro
 		p.connsOut[id] = connOut
 	}
 	return
-}
-
-func BadGateway(w io.Writer, msg string) {
-	log.Printf("Sending BadGateway: %s", msg)
-	resp := &http.Response{
-		StatusCode: 502,
-		ProtoMajor: 1,
-		ProtoMinor: 1,
-		Body:       &closeableStringReader{strings.NewReader(msg)},
-	}
-	resp.Write(w)
 }
 
 type closeableStringReader struct {

@@ -1,6 +1,7 @@
 package enproxy
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"log"
@@ -50,67 +51,82 @@ type Client struct {
 }
 
 func (c *Client) ListenAndServe(addr string) error {
-	httpServer := &http.Server{
-		Addr:         addr,
-		Handler:      c,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
 	}
-	return httpServer.ListenAndServe()
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			log.Printf("Error accepting connection: %s", err)
+			continue
+		}
+		go c.handleConn(conn)
+	}
 }
 
-func (c *Client) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
-	connId := uuid.NewRandom().String()
-	addr := hostIncludingPort(req)
+func (c *Client) handleConn(conn net.Conn) {
+	defer conn.Close()
 
-	requestBody, requestBodyWriter := io.Pipe()
-	go func() {
-		log.Printf("URI: %s", req.URL.RequestURI())
-		req.Write(requestBodyWriter)
-		requestBodyWriter.Close()
-	}()
+	// Add idle timing to conn
+	connIn := newIdleTimingConn(conn, defaultIdleTimeout)
+	// Set up a buffered reader
+	reader := bufio.NewReader(connIn)
+
+	// Set up a globally unique connection id
+	connId := uuid.NewRandom().String()
+	for {
+		req, err := http.ReadRequest(reader)
+		if err != nil {
+			log.Printf("Error reading request: %s", err)
+			return
+		}
+		if !c.handleRequest(connIn, reader, connId, req) {
+			return
+		}
+	}
+
+}
+
+func (c *Client) handleRequest(connIn *idleTimingConn, reader *bufio.Reader, connId string, req *http.Request) bool {
+	isConnect := req.Method == CONNECT
+	addr := hostIncludingPort(req, isConnect)
 
 	var reqOut *http.Request
 	var respOut *http.Response
 	var err error
 
-	if req.Method != "CONNECT" {
+	if !isConnect {
+		requestBody, requestBodyWriter := io.Pipe()
+		go func() {
+			req.Write(requestBodyWriter)
+			requestBodyWriter.Close()
+		}()
+
 		// Write out initial request
 		reqOut, err = c.buildRequestOut(connId, addr, requestBody)
 		if err != nil {
-			resp.WriteHeader(502)
-			fmt.Fprintf(resp, "Unable to construct outbound request: %s", err)
-			return
+			BadGateway(connIn, fmt.Sprintf("Unable to construct outbound request: %s", err))
+			return false
 		}
 
 		respOut, err = c.HttpClient.Do(reqOut)
 		if err != nil {
-			resp.WriteHeader(502)
-			resp.Write([]byte(err.Error()))
-			return
+			BadGateway(connIn, err.Error())
+			return false
 		}
 		if respOut.StatusCode != 200 {
-			resp.WriteHeader(502)
-			fmt.Fprintf(resp, "Unexpected response status from proxy: %d", respOut.StatusCode)
-			return
+			BadGateway(connIn, fmt.Sprintf("Unexpected response status from proxy: %d", respOut.StatusCode))
+			return false
 		}
 	} else {
-		resp.WriteHeader(200)
+		OK(connIn)
 	}
 
-	// Hijack inbound connection
-	_connIn, _, err := resp.(http.Hijacker).Hijack()
-	if err != nil {
-		resp.WriteHeader(502)
-		resp.Write([]byte(err.Error()))
-		return
-	}
-	// Add idle timing to connIn
-	connIn := newIdleTimingConn(_connIn, defaultIdleTimeout)
-
-	if req.Method != "CONNECT" {
-		if !copyResponse(connIn, respOut) {
-			return
+	if !isConnect {
+		moreToRead, err := copyResponse(connIn, respOut)
+		if !moreToRead {
+			return err == nil
 		}
 	}
 
@@ -118,26 +134,38 @@ func (c *Client) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 		// Still have more data to process
 		ireader := &impatientReadCloser{
 			orig:        connIn,
+			reader:      reader,
 			idleTimeout: defaultIdleInterval,
 			maxIdleTime: defaultPollInterval,
 			startTime:   time.Now(),
 		}
 		reqOut, err = c.buildRequestOut(connId, addr, ireader)
 		if err != nil {
-			return
+			return false
 		}
 		respOut, err = c.HttpClient.Do(reqOut)
-		done := err != nil || respOut.StatusCode != 200 || !copyResponse(connIn, respOut)
-		if done {
-			return
+		if err != nil || respOut.StatusCode != 200 {
+			return false
+		}
+		if ireader.hitEOF {
+			// connIn must be closed, stop processing
+			return false
+		}
+		moreToRead, err := copyResponse(connIn, respOut)
+		if !moreToRead {
+			return err == nil
 		}
 	}
 }
 
-func hostIncludingPort(req *http.Request) string {
+func hostIncludingPort(req *http.Request, https bool) string {
 	parts := strings.Split(req.Host, ":")
 	if len(parts) == 1 {
-		return req.Host + ":80"
+		port := 80
+		if https {
+			port = 443
+		}
+		return fmt.Sprintf("%s:%d", req.Host, port)
 	} else {
 		return req.Host
 	}
@@ -154,16 +182,19 @@ func (c *Client) buildRequestOut(connId string, addr string, requestBody io.Read
 	return reqOut, err
 }
 
-func copyResponse(connIn *idleTimingConn, respOut *http.Response) (moreToRead bool) {
-	io.Copy(connIn, respOut.Body)
+func copyResponse(connIn *idleTimingConn, respOut *http.Response) (moreToRead bool, err error) {
+	_, err = io.Copy(connIn, respOut.Body)
 	respOut.Body.Close()
-	return respOut.Header.Get(X_HTTPCONN_EOF) != "true"
+	moreToRead = err == nil && respOut.Header.Get(X_HTTPCONN_EOF) != "true"
+	return
 }
 
 type impatientReadCloser struct {
 	orig        *idleTimingConn
+	reader      *bufio.Reader
 	idleTimeout time.Duration
 	maxIdleTime time.Duration
+	hitEOF      bool
 	hasRead     bool
 	startTime   time.Time
 }
@@ -171,7 +202,7 @@ type impatientReadCloser struct {
 func (r *impatientReadCloser) Read(b []byte) (n int, err error) {
 	deadline := time.Now().Add(r.idleTimeout)
 	r.orig.SetReadDeadline(deadline)
-	n, err = r.orig.Read(b)
+	n, err = r.reader.Read(b)
 	if n > 0 {
 		r.hasRead = true
 	}
@@ -186,6 +217,10 @@ func (r *impatientReadCloser) Read(b []byte) (n int, err error) {
 				} else {
 					err = nil
 				}
+			}
+		default:
+			if e == io.EOF {
+				r.hitEOF = true
 			}
 		}
 	}
