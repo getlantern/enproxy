@@ -1,3 +1,4 @@
+// client is an example of using enproxy.Client
 package main
 
 import (

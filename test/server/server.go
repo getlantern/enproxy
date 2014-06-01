@@ -1,3 +1,4 @@
+// server.go is an example of using enproxy.NewServer
 package main
 
 import (
