@@ -61,7 +61,7 @@ func (s *Server) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	connOut, err := s.connOutFor(req)
 	if err != nil {
 		resp.WriteHeader(BAD_GATEWAY)
-		resp.Write([]byte(err.Error()))
+		resp.Write([]byte(fmt.Sprintf("Unable to get connOut: %s", err)))
 		return
 	}
 
@@ -69,7 +69,7 @@ func (s *Server) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	_, err = io.Copy(connOut, req.Body)
 	if err != nil && err != io.EOF {
 		resp.WriteHeader(BAD_GATEWAY)
-		resp.Write([]byte(err.Error()))
+		resp.Write([]byte(fmt.Sprintf("Unable to write to connOut: %s", err)))
 		connOut.Close()
 	}
 

@@ -5,6 +5,7 @@ package enproxy
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"log"
@@ -94,8 +95,10 @@ func (c *Client) handleIncomingConn(conn net.Conn) {
 	for {
 		req, err := http.ReadRequest(reader)
 		if err != nil {
+			log.Printf("Done reading requests: %s", err)
 			return
 		}
+		log.Printf("Read request: %s", req)
 		ctx := &requestContext{
 			c:      c,
 			connIn: connIn,
@@ -111,41 +114,43 @@ func (c *Client) handleIncomingConn(conn net.Conn) {
 
 // requestContext is a context for handling an inbound request
 type requestContext struct {
-	c      *Client
-	connIn *idleTimingConn
-	reader *bufio.Reader
-	connId string
-	req    *http.Request
-	addr   string
+	c           *Client
+	connIn      *idleTimingConn
+	reader      *bufio.Reader
+	connId      string
+	req         *http.Request
+	addr        string
+	isTunneling bool
 }
 
 // handle handles an inbound request, returning true if it's okay to continue
 // reading additional inbound requests, or false if processing should stop.
 func (ctx *requestContext) handle() bool {
-	isConnect := ctx.req.Method == CONNECT
-	ctx.addr = hostIncludingPort(ctx.req, isConnect)
+	ctx.isTunneling = ctx.req.Method == CONNECT
+	ctx.addr = hostIncludingPort(ctx.req, ctx.isTunneling)
 
-	if !isConnect {
-		needsMoreData, err := ctx.copyRequestToServer()
+	if ctx.isTunneling {
+		OK(ctx.connIn)
+		return ctx.processAdditionalData()
+	} else {
+		respOut, err := ctx.copyRequestToServer()
 		if err != nil {
 			BadGateway(ctx.connIn, err.Error())
 			return false
 		}
-		if !needsMoreData {
-			// Continue to reading next request
-			return true
-		}
-	} else {
-		OK(ctx.connIn)
+		go func() {
+			needsMoreData, _ := ctx.copyResponseFromServer(respOut)
+			if needsMoreData {
+				ctx.processAdditionalData()
+			}
+		}()
+		return true
 	}
-
-	return ctx.processAdditionalData()
 }
 
-// copyRequestToServer copies the current inbound request to the server.
-// It returns true if more data needs to be read from the server, or false if
-// the complete response for the request has been read.
-func (ctx *requestContext) copyRequestToServer() (bool, error) {
+// copyRequestToServer copies the current inbound request to the server and
+// returns the resulting response
+func (ctx *requestContext) copyRequestToServer() (*http.Response, error) {
 	requestBody, requestBodyWriter := io.Pipe()
 	go func() {
 		ctx.req.Write(requestBodyWriter)
@@ -154,18 +159,20 @@ func (ctx *requestContext) copyRequestToServer() (bool, error) {
 
 	reqOut, err := ctx.buildRequestOut(requestBody)
 	if err != nil {
-		return false, fmt.Errorf("Unable to construct outbound request: %s", err)
+		return nil, fmt.Errorf("Unable to construct outbound request: %s", err)
 	}
 
 	respOut, err := ctx.c.HttpClient.Do(reqOut)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	if respOut.StatusCode != 200 {
-		return false, fmt.Errorf("Unexpected response status from server: %d", respOut.StatusCode)
+		b := bytes.NewBuffer(nil)
+		io.Copy(b, respOut.Body)
+		return nil, fmt.Errorf("Unexpected response status from server: %d: %s", respOut.StatusCode, string(b.Bytes()))
 	}
 
-	return ctx.copyResponseFromServer(respOut)
+	return respOut, nil
 }
 
 // processAdditionalData processes additional data from the inbound conn and
@@ -174,14 +181,23 @@ func (ctx *requestContext) copyRequestToServer() (bool, error) {
 // or false of processing on the current inbound connection should stop.
 func (ctx *requestContext) processAdditionalData() bool {
 	for {
-		ireader := &impatientIn{
-			orig:         ctx.connIn,
-			reader:       ctx.reader,
-			idleInterval: ctx.c.IdleInterval,
-			pollInterval: ctx.c.PollInterval,
-			startTime:    time.Now(),
+		var ireader *impatientIn
+		var reader io.ReadCloser
+		if ctx.isTunneling {
+			// Continue to read from client
+			ireader = &impatientIn{
+				orig:         ctx.connIn,
+				reader:       ctx.reader,
+				idleInterval: ctx.c.IdleInterval,
+				pollInterval: ctx.c.PollInterval,
+				startTime:    time.Now(),
+			}
+			reader = ireader
+		} else {
+			// Don't read from client, just wait for poll interval
+			time.Sleep(ctx.c.PollInterval)
 		}
-		reqOut, err := ctx.buildRequestOut(ireader)
+		reqOut, err := ctx.buildRequestOut(reader)
 		if err != nil {
 			return false
 		}
@@ -189,9 +205,11 @@ func (ctx *requestContext) processAdditionalData() bool {
 		if err != nil || respOut.StatusCode != 200 {
 			return false
 		}
-		if ireader.hitEOF {
-			// connIn has closed, stop processing
-			return false
+		if ctx.isTunneling {
+			if ireader.hitEOF {
+				// connIn has closed, stop processing
+				return false
+			}
 		}
 		moreToRead, err := ctx.copyResponseFromServer(respOut)
 		if !moreToRead {
