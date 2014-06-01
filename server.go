@@ -130,7 +130,7 @@ func (s *Server) connOutFor(req *http.Request) (connOut *idleTimingConn, err err
 			return nil, fmt.Errorf("Unable to dial out to %s: %s", addr, err)
 		}
 
-		connOut = newIdleTimingConn(conn, defaultIdleTimeout, false)
+		connOut = newIdleTimingConn(conn, defaultIdleTimeout)
 		s.connsOut[id] = connOut
 	}
 	return
