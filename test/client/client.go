@@ -12,21 +12,35 @@ import (
 )
 
 func main() {
+	enproxyConfig := &enproxy.Config{
+		DialProxy: func(addr string) (net.Conn, error) {
+			return net.Dial("tcp", os.Args[2])
+		},
+		NewRequest: func(method string, body io.Reader) (req *http.Request, err error) {
+			return http.NewRequest(method, "http://"+os.Args[2]+"/", body)
+		},
+	}
 	httpServer := &http.Server{
 		Addr: os.Args[1],
 		Handler: &ClientHandler{
 			ProxyAddr: os.Args[2],
-			Config: &enproxy.Config{
-				DialProxy: func(addr string) (net.Conn, error) {
-					return net.Dial("tcp", os.Args[2])
-				},
-				NewRequest: func(method string, body io.Reader) (req *http.Request, err error) {
-					return http.NewRequest(method, "http://"+os.Args[2]+"/", body)
-				},
-			},
+			Config:    enproxyConfig,
 			ReverseProxy: &httputil.ReverseProxy{
 				Director: func(req *http.Request) {
 					// do nothing
+				},
+				Transport: &http.Transport{
+					Dial: func(network string, addr string) (net.Conn, error) {
+						conn := &enproxy.Conn{
+							Addr:   addr,
+							Config: enproxyConfig,
+						}
+						err := conn.Connect()
+						if err != nil {
+							return nil, err
+						}
+						return conn, nil
+					},
 				},
 			},
 		},
