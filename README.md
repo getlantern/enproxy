@@ -1,11 +1,28 @@
 enproxy [![Travis CI Status](https://travis-ci.org/getlantern/enproxy.svg?branch=master)](https://travis-ci.org/getlantern/enproxy)&nbsp;[![Coverage Status](https://coveralls.io/repos/getlantern/enproxy/badge.png)](https://coveralls.io/r/getlantern/enproxy)&nbsp;[![GoDoc](https://godoc.org/github.com/getlantern/enproxy?status.png)](http://godoc.org/github.com/getlantern/enproxy)
 ==========
 
-Chained HTTP proxy that supports arbitrary TCP traffic tunneled over HTTP
-proxies using encapsulated HTTP requests.
-
 enproxy provides an implementation of net.Conn that sends and receives data to/
 from a proxy using HTTP request/response pairs that encapsulate the data.  This
 is useful when you need to tunnel arbitrary protocols over an HTTP proxy that
 doesn't support HTTP CONNECT.  Content distribution networks are one example of
 such a proxy.
+
+To open such a connection:
+
+```go
+conn := &enproxy.Conn{
+  Addr:   addr,
+  Config: &enproxy.Config{
+    DialProxy: func(addr string) (net.Conn, error) {
+      return net.Dial("tcp", proxyAddress)
+    },
+    NewRequest: func(method string, body io.Reader) (req *http.Request, err error) {
+      return http.NewRequest(method, "http://"+proxyAddress+"/", body)
+    },
+  },
+}
+err := conn.Connect()
+if err == nil {
+  // start using conn as any other net.Conn
+}
+```
