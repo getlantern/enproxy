@@ -22,7 +22,7 @@ type Proxy struct {
 
 	bufferSize int
 
-	connMap map[string]*idleTimingConn // map of outbound connections by their id
+	connMap map[string]net.Conn // map of outbound connections by their id
 }
 
 // NewProxy sets up a new proxy.
@@ -40,7 +40,7 @@ func NewProxy(idleInterval time.Duration, bufferSize int) *Proxy {
 	return &Proxy{
 		idleInterval: idleInterval,
 		bufferSize:   bufferSize,
-		connMap:      make(map[string]*idleTimingConn),
+		connMap:      make(map[string]net.Conn),
 	}
 }
 
@@ -111,7 +111,7 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 
 // connOutFor opens an outbound connection to the destination requested by the
 // given http.Request.
-func (p *Proxy) connOutFor(req *http.Request) (connOut *idleTimingConn, err error) {
+func (p *Proxy) connOutFor(req *http.Request) (connOut net.Conn, err error) {
 	id := req.Header.Get(X_HTTPCONN_ID)
 	if id == "" {
 		return nil, fmt.Errorf("No id found in header %s", X_HTTPCONN_ID)
@@ -132,7 +132,7 @@ func (p *Proxy) connOutFor(req *http.Request) (connOut *idleTimingConn, err erro
 		}
 
 		// Wrap the connection in an idle timing one
-		connOut = newIdleTimingConn(conn, defaultIdleTimeout, func() {
+		connOut = withIdleTimeout(conn, defaultIdleTimeout, func() {
 			delete(p.connMap, id)
 		})
 
@@ -150,13 +150,13 @@ type idleTimingConn struct {
 	closed           chan bool
 }
 
-// newIdleTimingConn creates a new idleTimingConn.
+// withIdleTimeout creates a new idleTimingConn wrapping the given net.Conn.
 //
 // idleTimeout specifies how long to wait for inactivity before considering
 // connection idle.
 //
 // onClose is an optional function to call after the connection has been closed
-func newIdleTimingConn(conn net.Conn, idleTimeout time.Duration, onClose func()) *idleTimingConn {
+func withIdleTimeout(conn net.Conn, idleTimeout time.Duration, onClose func()) *idleTimingConn {
 	c := &idleTimingConn{
 		conn:             conn,
 		idleTimeout:      idleTimeout,
