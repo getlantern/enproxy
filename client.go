@@ -95,10 +95,8 @@ func (c *Client) handleIncomingConn(conn net.Conn) {
 	for {
 		req, err := http.ReadRequest(reader)
 		if err != nil {
-			log.Printf("Done reading requests: %s", err)
 			return
 		}
-		log.Printf("Read request: %s", req)
 		ctx := &requestContext{
 			c:      c,
 			connIn: connIn,
@@ -129,28 +127,27 @@ func (ctx *requestContext) handle() bool {
 	ctx.isTunneling = ctx.req.Method == CONNECT
 	ctx.addr = hostIncludingPort(ctx.req, ctx.isTunneling)
 
-	if ctx.isTunneling {
-		OK(ctx.connIn)
-		return ctx.processAdditionalData()
-	} else {
-		respOut, err := ctx.copyRequestToServer()
+	if !ctx.isTunneling {
+		needsMoreData, err := ctx.copyRequestToServer()
 		if err != nil {
 			BadGateway(ctx.connIn, err.Error())
 			return false
 		}
-		go func() {
-			needsMoreData, _ := ctx.copyResponseFromServer(respOut)
-			if needsMoreData {
-				ctx.processAdditionalData()
-			}
-		}()
-		return true
+		if !needsMoreData {
+			// Continue to reading next request
+			return true
+		}
+	} else {
+		OK(ctx.connIn)
 	}
+
+	return ctx.processAdditionalData()
 }
 
-// copyRequestToServer copies the current inbound request to the server and
-// returns the resulting response
-func (ctx *requestContext) copyRequestToServer() (*http.Response, error) {
+// copyRequestToServer copies the current inbound request to the server.
+// It returns true if more data needs to be read from the server, or false if
+// the complete response for the request has been read.
+func (ctx *requestContext) copyRequestToServer() (bool, error) {
 	requestBody, requestBodyWriter := io.Pipe()
 	go func() {
 		ctx.req.Write(requestBodyWriter)
@@ -159,20 +156,20 @@ func (ctx *requestContext) copyRequestToServer() (*http.Response, error) {
 
 	reqOut, err := ctx.buildRequestOut(requestBody)
 	if err != nil {
-		return nil, fmt.Errorf("Unable to construct outbound request: %s", err)
+		return false, fmt.Errorf("Unable to construct outbound request: %s", err)
 	}
 
 	respOut, err := ctx.c.HttpClient.Do(reqOut)
 	if err != nil {
-		return nil, err
+		return false, err
 	}
 	if respOut.StatusCode != 200 {
 		b := bytes.NewBuffer(nil)
 		io.Copy(b, respOut.Body)
-		return nil, fmt.Errorf("Unexpected response status from server: %d: %s", respOut.StatusCode, string(b.Bytes()))
+		return false, fmt.Errorf("Unexpected response status from server: %d: %s", respOut.StatusCode, string(b.Bytes()))
 	}
 
-	return respOut, nil
+	return ctx.copyResponseFromServer(respOut)
 }
 
 // processAdditionalData processes additional data from the inbound conn and
