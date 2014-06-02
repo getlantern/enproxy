@@ -26,3 +26,13 @@ if err == nil {
   // start using conn as any other net.Conn
 }
 ```
+
+To start a proxy server:
+
+```go
+proxy := enproxy.NewProxy(0, 0)
+err := proxy.ListenAndServe(os.Args[1])
+if err != nil {
+  log.Fatalf("Unable to listen and serve: %s", err)
+}
+```
