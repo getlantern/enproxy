@@ -30,18 +30,18 @@ func (c *Config) Intercept(resp http.ResponseWriter, req *http.Request, shouldPr
 
 	// Check for local addresses, which we proxy directly
 	if !shouldProxyLoopback && isLoopback(addr) {
-		c.direct(resp, clientConn, addr)
+		c.direct(clientConn, addr)
 	} else {
-		c.proxied(resp, clientConn, buffClientConn, req, addr)
+		c.proxied(resp, req, clientConn, buffClientConn, addr)
 	}
 }
 
 // direct pipes data directly to the requested address
-func (c *Config) direct(resp http.ResponseWriter, clientConn net.Conn, addr string) {
+func (c *Config) direct(clientConn net.Conn, addr string) {
 	connOut, err := net.Dial("tcp", addr)
 	if err != nil {
-		resp.WriteHeader(502)
-		fmt.Fprintf(resp, "Unable to dial loopback: %s", err)
+		BadGateway(clientConn, fmt.Sprintf("Unable to dial loopback address %s: %s", addr, err))
+		return
 	}
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -58,7 +58,7 @@ func (c *Config) direct(resp http.ResponseWriter, clientConn net.Conn, addr stri
 }
 
 // proxied proxies via an enproxy.Proxy
-func (c *Config) proxied(resp http.ResponseWriter, clientConn net.Conn, buffClientConn *bufio.ReadWriter, req *http.Request, addr string) {
+func (c *Config) proxied(resp http.ResponseWriter, req *http.Request, clientConn net.Conn, buffClientConn *bufio.ReadWriter, addr string) {
 	// Establish outbound connection
 	proxyConn := &Conn{
 		Addr:   addr,
