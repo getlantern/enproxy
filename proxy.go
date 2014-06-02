@@ -28,11 +28,12 @@ type Proxy struct {
 // NewProxy sets up a new proxy.
 //
 // idleInterval controls how long to wait for the next write before finishing
-// the current HTTP response to the client.
+// the current HTTP response to the client.  If given as 0, defaults to 10
+// seconds.
 //
 // bufferSize controls the size of the buffers used for copying data from
 // outbound to inbound connection.  If given as 0, defaults to
-// DEFAULT_BUFFER_SIZE bytes.
+// 8096 bytes.
 func NewProxy(idleInterval time.Duration, bufferSize int) *Proxy {
 	if bufferSize == 0 {
 		bufferSize = DEFAULT_BUFFER_SIZE

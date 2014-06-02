@@ -2,6 +2,7 @@ package enproxy
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"log"
@@ -215,7 +216,9 @@ func (c *Conn) processRead(b []byte) (n int, err error, responseFinished bool) {
 		// Check response status
 		responseOK := c.resp.StatusCode >= 200 && c.resp.StatusCode < 300
 		if !responseOK {
-			err = fmt.Errorf("Error writing, response status: %d", c.resp.StatusCode)
+			respText := bytes.NewBuffer(nil)
+			c.resp.Write(respText)
+			err = fmt.Errorf("Error writing, response status: %d\n\n", c.resp.StatusCode, string(respText.Bytes()))
 			return
 		}
 	}
