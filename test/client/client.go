@@ -54,7 +54,7 @@ func (c *ClientHandler) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 func (c *ClientHandler) handleRequest(connIn net.Conn, buffIn *bufio.ReadWriter, req *http.Request) error {
 	// Establish outbound connection
 	addr := hostIncludingPort(req)
-	connOut := &enproxy.Client{
+	connOut := &enproxy.Conn{
 		Addr: addr,
 		Config: &enproxy.Config{
 			DialProxy: func(addr string) (net.Conn, error) {

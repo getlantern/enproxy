@@ -22,7 +22,7 @@ var (
 	defaultIdleTimeout     = 10 * time.Second
 )
 
-// Client is a net.Conn that tunnels its data via an httpconn.Proxy using HTTP
+// Conn is a net.Conn that tunnels its data via an httpconn.Proxy using HTTP
 // requests and responses.  It assumes that streaming requests are not supported
 // by the underlying servers/proxies, and so uses a polling technique similar to
 // the one used by meek, but different in that data is not encoded as JSON.
@@ -42,7 +42,7 @@ var (
 //      request in order to pick up any new data received on the proxy, start
 //      accepting reads (step 3)
 //
-type Client struct {
+type Conn struct {
 	Config *Config
 
 	writeRequests    chan []byte      // requests to write
@@ -52,7 +52,7 @@ type Client struct {
 	lastActivityTime time.Time        // time of last read or write
 	stop             chan interface{} // stop notification
 	closedMutex      sync.RWMutex     // mutex controlling access to closed flag
-	closed           bool             // whether or not this Client is closed
+	closed           bool             // whether or not this Conn is closed
 
 	// Addr: the host:port of the destination server that we're trying to reach
 	Addr string
@@ -97,7 +97,7 @@ type Config struct {
 	IdleInterval time.Duration
 }
 
-func (c *Client) LocalAddr() net.Addr {
+func (c *Conn) LocalAddr() net.Addr {
 	if c.proxyConn == nil {
 		return nil
 	} else {
@@ -105,11 +105,11 @@ func (c *Client) LocalAddr() net.Addr {
 	}
 }
 
-func (c *Client) RemoteAddr() net.Addr {
+func (c *Conn) RemoteAddr() net.Addr {
 	return c.netAddr
 }
 
-func (c *Client) Write(b []byte) (n int, err error) {
+func (c *Conn) Write(b []byte) (n int, err error) {
 	if c.isClosed() {
 		return 0, io.EOF
 	}
@@ -122,7 +122,7 @@ func (c *Client) Write(b []byte) (n int, err error) {
 	}
 }
 
-func (c *Client) Read(b []byte) (n int, err error) {
+func (c *Conn) Read(b []byte) (n int, err error) {
 	if c.isClosed() {
 		return 0, io.EOF
 	}
@@ -135,21 +135,21 @@ func (c *Client) Read(b []byte) (n int, err error) {
 	}
 }
 
-func (c *Client) Close() error {
+func (c *Conn) Close() error {
 	if c.markClosed() {
 		c.stop <- true
 	}
 	return nil
 }
 
-func (c *Client) SetDeadline(t time.Time) error {
+func (c *Conn) SetDeadline(t time.Time) error {
 	panic("SetDeadline not implemented")
 }
 
-func (c *Client) SetReadDeadline(t time.Time) error {
+func (c *Conn) SetReadDeadline(t time.Time) error {
 	panic("SetReadDeadline not implemented")
 }
 
-func (c *Client) SetWriteDeadline(t time.Time) error {
+func (c *Conn) SetWriteDeadline(t time.Time) error {
 	panic("SetWriteDeadline not implemented")
 }

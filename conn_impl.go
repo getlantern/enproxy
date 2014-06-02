@@ -15,7 +15,7 @@ import (
 
 // Connect opens a connection to the proxy and tells it to connect to the
 // destination proxy.
-func (c *Client) Connect() error {
+func (c *Conn) Connect() error {
 	err := c.resolveAddress()
 	if err != nil {
 		return err
@@ -34,7 +34,7 @@ func (c *Client) Connect() error {
 	return nil
 }
 
-func (c *Client) resolveAddress() (err error) {
+func (c *Conn) resolveAddress() (err error) {
 	c.netAddr, err = net.ResolveIPAddr("ip", c.Addr)
 	if err != nil {
 		return fmt.Errorf("Unable to resolve address %s: %s", c.Addr, err)
@@ -42,7 +42,7 @@ func (c *Client) resolveAddress() (err error) {
 	return nil
 }
 
-func (c *Client) defaultTimeouts() {
+func (c *Conn) defaultTimeouts() {
 	if c.Config.PollInterval == 0 {
 		c.Config.PollInterval = defaultPollInterval
 	}
@@ -54,7 +54,7 @@ func (c *Client) defaultTimeouts() {
 	}
 }
 
-func (c *Client) makeChannels() {
+func (c *Conn) makeChannels() {
 	c.writeRequests = make(chan []byte)
 	c.writeResponses = make(chan rwResponse)
 	c.readRequests = make(chan []byte)
@@ -62,11 +62,11 @@ func (c *Client) makeChannels() {
 	c.stop = make(chan interface{}, 100)
 }
 
-func (c *Client) startIdleTimer() {
+func (c *Conn) startIdleTimer() {
 	c.lastActivityTime = time.Now()
 }
 
-func (c *Client) dialProxy() (err error) {
+func (c *Conn) dialProxy() (err error) {
 	c.proxyConn, err = c.Config.DialProxy(c.Addr)
 	if err != nil {
 		return fmt.Errorf("Unable to dial proxy: %s", err)
@@ -75,8 +75,8 @@ func (c *Client) dialProxy() (err error) {
 	return nil
 }
 
-// process processes writes and reads until the Client is closed
-func (c *Client) process() {
+// process processes writes and reads until the Conn is closed
+func (c *Conn) process() {
 	defer func() {
 		c.drainAndCloseChannels()
 		c.proxyConn.Close()
@@ -110,7 +110,7 @@ func (c *Client) process() {
 }
 
 // processWrite processes a single write
-func (c *Client) processWrite(b []byte) (ok bool) {
+func (c *Conn) processWrite(b []byte) (ok bool) {
 	if c.req == nil {
 		err := c.initRequest()
 		if err != nil {
@@ -129,7 +129,7 @@ func (c *Client) processWrite(b []byte) (ok bool) {
 }
 
 // initRequest sets up a new request to encapsulate our writes
-func (c *Client) initRequest() error {
+func (c *Conn) initRequest() error {
 	// Construct a pipe for piping data to proxy
 	c.pipeReader, c.pipeWriter = io.Pipe()
 
@@ -140,7 +140,7 @@ func (c *Client) initRequest() error {
 // processReads processes read requests until EOF is reached on the response to
 // our encapsulated HTTP request, or if we've hit our idle interval and still
 // haven't received a read request
-func (c *Client) processReads() (ok bool) {
+func (c *Conn) processReads() (ok bool) {
 	// Set resp to nil
 	c.resp = nil
 	haveReceivedReadRequest := false
@@ -178,7 +178,7 @@ func (c *Client) processReads() (ok bool) {
 	return true
 }
 
-func (c *Client) processRead(b []byte) (n int, err error, responseFinished bool) {
+func (c *Conn) processRead(b []byte) (n int, err error, responseFinished bool) {
 	if c.resp == nil {
 		if c.req == nil {
 			// Request was nil, meaning that we never wrote anything
@@ -235,7 +235,7 @@ func (c *Client) processRead(b []byte) (n int, err error, responseFinished bool)
 // post posts a request with the given body to the proxy.  If writeImmediate is
 // true, the request is written before post returns.  Otherwise, the request is
 // written on a goroutine and post returns immediately.
-func (c *Client) post(requestBody io.ReadCloser, writeImmediate bool) (err error) {
+func (c *Conn) post(requestBody io.ReadCloser, writeImmediate bool) (err error) {
 	c.req, err = c.Config.NewRequest("POST", requestBody)
 	if err != nil {
 		return fmt.Errorf("Unable to construct request to proxy: %s", err)
@@ -263,7 +263,7 @@ func (c *Client) post(requestBody io.ReadCloser, writeImmediate bool) (err error
 // drainAndCloseChannels drains all inbound channels and then closes them, which
 // ensures that any read or write ops after this connection was closed receive
 // io.EOF to indicate that the connection is closed.
-func (c *Client) drainAndCloseChannels() {
+func (c *Conn) drainAndCloseChannels() {
 	c.markClosed()
 	for {
 		select {
@@ -282,16 +282,16 @@ func (c *Client) drainAndCloseChannels() {
 	}
 }
 
-func (c *Client) hadActivity() {
+func (c *Conn) hadActivity() {
 	c.lastActivityTime = time.Now()
 }
 
-func (c *Client) isIdle() bool {
+func (c *Conn) isIdle() bool {
 	timeSinceLastActivity := time.Now().Sub(c.lastActivityTime)
 	return timeSinceLastActivity > c.Config.IdleTimeout
 }
 
-func (c *Client) markClosed() bool {
+func (c *Conn) markClosed() bool {
 	c.closedMutex.Lock()
 	defer c.closedMutex.Unlock()
 	didClose := !c.closed
@@ -299,7 +299,7 @@ func (c *Client) markClosed() bool {
 	return didClose
 }
 
-func (c *Client) isClosed() bool {
+func (c *Conn) isClosed() bool {
 	c.closedMutex.RLock()
 	defer c.closedMutex.RUnlock()
 	return c.closed

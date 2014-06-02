@@ -50,9 +50,9 @@ func TestTLS(t *testing.T) {
 	doRequests(tlsConn, t)
 }
 
-func prepareConn(port int, t *testing.T) (conn *Client) {
+func prepareConn(port int, t *testing.T) (conn *Conn) {
 	addr := fmt.Sprintf("%s:%d", "www.google.com", port)
-	conn = &Client{
+	conn = &Conn{
 		Addr: addr,
 		Config: &Config{
 			DialProxy: func(addr string) (net.Conn, error) {
