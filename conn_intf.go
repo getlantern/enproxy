@@ -33,10 +33,7 @@ var (
 //   2. Continue to pipe the writes until the pause between consecutive writes
 //      exceeds the IdleInterval, at which point we finish the request body
 //   3. Accept reads, reading the data from the response body until EOF is
-//      is reached or the gap between consecutive reads exceeds the
-//      IdleInterval. If EOF wasn't reached, whenever we next accept reads, we
-//      will continue to read from the same response until EOF is reached, then
-//      move on to the next response.
+//      is reached or no read was attempted for more than IdleInterval.
 //   4. Go back to accepting writes (step 1)
 //   5. If no writes are received for more than PollInterval, issue an empty
 //      request in order to pick up any new data received by the proxy, start
@@ -70,8 +67,8 @@ type Conn struct {
 
 	/* Fields for tracking current request and response */
 	req             *http.Request  // the current request being used to send data
-	pipeReader      *io.PipeReader // pipe reader for current request body
-	pipeWriter      *io.PipeWriter // pipe writer to current request body
+	reqBody         *io.PipeReader // pipe reader for current request body
+	reqBodyWriter   *io.PipeWriter // pipe writer to current request body
 	resp            *http.Response // the current response being used to read data
 	lastRequestTime time.Time      // time of last request
 }

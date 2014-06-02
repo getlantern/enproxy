@@ -13,8 +13,8 @@ import (
 	"code.google.com/p/go-uuid/uuid"
 )
 
-// Connect opens a connection to the proxy and tells it to connect to the
-// destination proxy.
+// Connect opens a connection to the proxy and starts processing writes and
+// reads to this Conn.
 func (c *Conn) Connect() error {
 	err := c.resolveAddress()
 	if err != nil {
@@ -91,14 +91,14 @@ func (c *Conn) process() {
 		}
 		select {
 		case b := <-c.writeRequests:
-			c.hadActivity()
+			c.markActive()
 			// Consume writes as long as they keep coming in
 			if !c.processWrite(b) {
 				return
 			}
 		case <-time.After(c.Config.PollInterval):
 			if c.isIdle() {
-				// No activity for a while, stop processing
+				// No activity for more than IdleTimeout, stop processing
 				return
 			}
 			// We waited more than PollInterval for a write, proceed to reading
@@ -107,6 +107,7 @@ func (c *Conn) process() {
 				return
 			}
 		case <-c.stop:
+			// Stop requested, stop processing
 			return
 		}
 	}
@@ -115,37 +116,34 @@ func (c *Conn) process() {
 // processWrite processes a single write
 func (c *Conn) processWrite(b []byte) (ok bool) {
 	if c.req == nil {
-		err := c.initRequest()
+		err := c.initRequestToProxy()
 		if err != nil {
 			c.writeResponses <- rwResponse{0, err}
 			return false
 		}
 	}
-	n, err := c.pipeWriter.Write(b)
+	n, err := c.reqBodyWriter.Write(b)
 	if err != nil {
 		c.writeResponses <- rwResponse{n, fmt.Errorf("Unable to write to proxy pipe: %s", err)}
 		return false
-	} else {
-		c.writeResponses <- rwResponse{n, nil}
 	}
+	c.writeResponses <- rwResponse{n, nil}
 	return true
 }
 
-// initRequest sets up a new request to encapsulate our writes
-func (c *Conn) initRequest() error {
+// initRequestToProxy sets up a new request to encapsulate our writes to Proxy
+func (c *Conn) initRequestToProxy() error {
 	// Construct a pipe for piping data to proxy
-	c.pipeReader, c.pipeWriter = io.Pipe()
+	c.reqBody, c.reqBodyWriter = io.Pipe()
 
 	// Construct a new HTTP POST to encapsulate our data
-	return c.post(c.pipeReader, false)
+	return c.post(c.reqBody, false)
 }
 
 // processReads processes read requests until EOF is reached on the response to
-// our encapsulated HTTP request, or if we've hit our idle interval and still
+// our encapsulated HTTP request, or we've hit our idle interval and still
 // haven't received a read request
 func (c *Conn) processReads() (ok bool) {
-	// Set resp to nil
-	c.resp = nil
 	haveReceivedReadRequest := false
 	for {
 		select {
@@ -153,7 +151,7 @@ func (c *Conn) processReads() (ok bool) {
 			haveReceivedReadRequest = true
 			n, err, responseFinished := c.processRead(b)
 			if n > 0 {
-				c.hadActivity()
+				c.markActive()
 			}
 			c.readResponses <- rwResponse{n, err}
 			if err != nil {
@@ -183,7 +181,10 @@ func (c *Conn) processReads() (ok bool) {
 
 func (c *Conn) processRead(b []byte) (n int, err error, responseFinished bool) {
 	if c.resp == nil {
-		if c.req == nil {
+		if c.req != nil {
+			// Stop writing to request body
+			c.reqBodyWriter.Close()
+		} else {
 			// Request was nil, meaning that we never wrote anything
 			reachedPollInterval := time.Now().Sub(c.lastRequestTime) > c.Config.PollInterval
 			if reachedPollInterval {
@@ -198,19 +199,20 @@ func (c *Conn) processRead(b []byte) (n int, err error, responseFinished bool) {
 				responseFinished = true
 				return
 			}
-		} else {
-			// Stop writing to request body
-			c.pipeWriter.Close()
 		}
+
 		// Read the next response
 		c.resp, err = http.ReadResponse(c.bufReader, c.req)
 		if err != nil {
 			err = fmt.Errorf("Unable to read response from proxy: %s", err)
 			return
 		}
+
 		// Clear request in preparation for future writes (which will set up
 		// their own request)
 		c.req = nil
+
+		// Check response status
 		responseOK := c.resp.StatusCode >= 200 && c.resp.StatusCode < 300
 		if !responseOK {
 			err = fmt.Errorf("Error writing, response status: %d", c.resp.StatusCode)
@@ -218,6 +220,7 @@ func (c *Conn) processRead(b []byte) (n int, err error, responseFinished bool) {
 		}
 	}
 
+	// Read from response body
 	n, err = c.resp.Body.Read(b)
 	if err == nil {
 		// Do an extra read to see if we've reached EOF
@@ -227,8 +230,7 @@ func (c *Conn) processRead(b []byte) (n int, err error, responseFinished bool) {
 		responseFinished = true
 		serverEOF := c.resp.Header.Get(X_HTTPCONN_EOF) != ""
 		if !serverEOF {
-			// Hide EOF, since the server thinks there may be more to read on
-			// future requests
+			// Server thinks there may be more to read, suppress EOF to client.
 			err = nil
 		}
 	}
@@ -285,7 +287,7 @@ func (c *Conn) drainAndCloseChannels() {
 	}
 }
 
-func (c *Conn) hadActivity() {
+func (c *Conn) markActive() {
 	c.lastActivityTime = time.Now()
 }
 
