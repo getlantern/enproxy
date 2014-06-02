@@ -11,9 +11,15 @@ import (
 	"sync"
 )
 
-// Intercept intercepts a request/response pair and starts piping the data over
-// a new enproxy.Conn
+// Intercept intercepts a CONNECT request, hijacks the underlying client
+// connetion and starts piping the data over a new enproxy.Conn configured using
+// this Config.
 func (c *Config) Intercept(resp http.ResponseWriter, req *http.Request) {
+	if req.Method != "CONNECT" {
+		panic("Intercept used for non-CONNECT request!")
+	}
+
+	// Hijack underlying connection
 	clientConn, buffClientConn, err := resp.(http.Hijacker).Hijack()
 	if err != nil {
 		resp.WriteHeader(502)
@@ -36,6 +42,8 @@ func (c *Config) Intercept(resp http.ResponseWriter, req *http.Request) {
 	pipeData(clientConn, buffClientConn, proxyConn, req)
 }
 
+// pipeData pipes data between the client and proxy connections.  It's also
+// responsible for responding to the initial CONNECT request with a 200 OK.
 func pipeData(clientConn net.Conn, buffClientConn *bufio.ReadWriter, proxyConn *Conn, req *http.Request) {
 	// Pipe data between inbound and outbound connections
 	var wg sync.WaitGroup
@@ -75,7 +83,7 @@ func respondOK(clientConn net.Conn, req *http.Request) error {
 func hostIncludingPort(req *http.Request) string {
 	parts := strings.Split(req.Host, ":")
 	if len(parts) == 1 {
-		return req.Host + ":80"
+		return req.Host + ":443"
 	} else {
 		return req.Host
 	}
