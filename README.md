@@ -14,9 +14,11 @@ conn := &enproxy.Conn{
   Addr:   addr,
   Config: &enproxy.Config{
     DialProxy: func(addr string) (net.Conn, error) {
+      // This opens a TCP connection to the proxy
       return net.Dial("tcp", proxyAddress)
     },
     NewRequest: func(method string, body io.Reader) (req *http.Request, err error) {
+      // This is called for every request from enproxy.Conn to the proxy
       return http.NewRequest(method, "http://"+proxyAddress+"/", body)
     },
   },
