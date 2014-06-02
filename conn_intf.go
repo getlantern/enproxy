@@ -19,7 +19,7 @@ var (
 	defaultPollInterval    = 50 * time.Millisecond
 	defaultIdleInterval    = 5 * time.Millisecond
 	firstWriteIdleInterval = 1000 * time.Hour // just needs to be a really large value
-	defaultIdleTimeout     = 10 * time.Second
+	defaultIdleTimeout     = 70 * time.Second
 )
 
 // Conn is a net.Conn that tunnels its data via an httpconn.Proxy using HTTP
@@ -91,7 +91,8 @@ type Config struct {
 	// NewRequest: function to create a new request to the proxy
 	NewRequest newRequestFunc
 
-	// IdleTimeout: how long to wait for a read before switching to writing
+	// IdleTimeout: how long to wait for a read before switching to writing,
+	// defaults to 70 seconds
 	IdleTimeout time.Duration
 
 	// PollInterval: how frequently to poll (i.e. create a new request/response)
@@ -99,7 +100,7 @@ type Config struct {
 	PollInterval time.Duration
 
 	// IdleInterval: how long to wait for the next write/read before switching
-	// to read/write (defaults to 1 millisecond)
+	// to read/write (defaults to 5 milliseconds)
 	IdleInterval time.Duration
 }
 
