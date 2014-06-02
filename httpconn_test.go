@@ -1,4 +1,4 @@
-package httpconn
+package enproxy
 
 import (
 	"bufio"
@@ -54,11 +54,13 @@ func prepareConn(port int, t *testing.T) (conn *Client) {
 	addr := fmt.Sprintf("%s:%d", "www.google.com", port)
 	conn = &Client{
 		Addr: addr,
-		DialProxy: func(addr string) (net.Conn, error) {
-			return net.Dial("tcp", PROXY_ADDR)
-		},
-		NewRequest: func(method string, body io.Reader) (req *http.Request, err error) {
-			return http.NewRequest(method, "http://"+PROXY_ADDR, body)
+		Config: &Config{
+			DialProxy: func(addr string) (net.Conn, error) {
+				return net.Dial("tcp", PROXY_ADDR)
+			},
+			NewRequest: func(method string, body io.Reader) (req *http.Request, err error) {
+				return http.NewRequest(method, "http://"+PROXY_ADDR, body)
+			},
 		},
 	}
 	err := conn.Connect()
@@ -116,7 +118,7 @@ func startProxy(t *testing.T) {
 		return
 	}
 	go func() {
-		proxy := NewProxy(0)
+		proxy := NewProxy(0, 0)
 		err := proxy.ListenAndServe(PROXY_ADDR)
 		if err != nil {
 			t.Fatalf("Unable to listen and serve: %s", err)

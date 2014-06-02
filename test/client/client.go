@@ -12,7 +12,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/getlantern/httpconn"
+	"github.com/getlantern/enproxy"
 )
 
 func main() {
@@ -54,9 +54,9 @@ func (c *ClientHandler) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 func (c *ClientHandler) handleRequest(connIn net.Conn, buffIn *bufio.ReadWriter, req *http.Request) error {
 	// Establish outbound connection
 	addr := hostIncludingPort(req)
-	connOut := &httpconn.Client{
+	connOut := &enproxy.Client{
 		Addr: addr,
-		Config: &httpconn.Config{
+		Config: &enproxy.Config{
 			DialProxy: func(addr string) (net.Conn, error) {
 				return net.Dial("tcp", os.Args[2])
 			},
@@ -81,7 +81,7 @@ func (c *ClientHandler) handleRequest(connIn net.Conn, buffIn *bufio.ReadWriter,
 		if req.Method != "CONNECT" {
 			err = req.Write(connOut)
 			if err != nil {
-				httpconn.BadGateway(connIn, fmt.Sprintf("Unable to write out request: %s", err))
+				enproxy.BadGateway(connIn, fmt.Sprintf("Unable to write out request: %s", err))
 			}
 		} else {
 			resp := &http.Response{

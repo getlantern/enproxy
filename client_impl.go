@@ -1,4 +1,4 @@
-package httpconn
+package enproxy
 
 import (
 	"bufio"
