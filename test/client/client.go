@@ -59,7 +59,7 @@ type ClientHandler struct {
 
 func (c *ClientHandler) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	if req.Method == "CONNECT" {
-		c.Config.Intercept(resp, req)
+		c.Config.Intercept(resp, req, true)
 	} else {
 		c.ReverseProxy.ServeHTTP(resp, req)
 	}

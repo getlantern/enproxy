@@ -14,7 +14,7 @@ import (
 // Intercept intercepts a CONNECT request, hijacks the underlying client
 // connetion and starts piping the data over a new enproxy.Conn configured using
 // this Config.
-func (c *Config) Intercept(resp http.ResponseWriter, req *http.Request) {
+func (c *Config) Intercept(resp http.ResponseWriter, req *http.Request, shouldProxyLoopback bool) {
 	if req.Method != "CONNECT" {
 		panic("Intercept used for non-CONNECT request!")
 	}
@@ -26,13 +26,45 @@ func (c *Config) Intercept(resp http.ResponseWriter, req *http.Request) {
 		fmt.Fprintf(resp, "Unable to hijack connection: %s", err)
 	}
 
-	// Establish outbound connection
 	addr := hostIncludingPort(req)
+
+	// Check for local addresses, which we proxy directly
+	if !shouldProxyLoopback && isLoopback(addr) {
+		c.direct(resp, clientConn, addr)
+	} else {
+		c.proxied(resp, clientConn, buffClientConn, req, addr)
+	}
+}
+
+// direct pipes data directly to the requested address
+func (c *Config) direct(resp http.ResponseWriter, clientConn net.Conn, addr string) {
+	connOut, err := net.Dial("tcp", addr)
+	if err != nil {
+		resp.WriteHeader(502)
+		fmt.Fprintf(resp, "Unable to dial loopback: %s", err)
+	}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		io.Copy(connOut, clientConn)
+		wg.Done()
+	}()
+	go func() {
+		io.Copy(clientConn, connOut)
+		connOut.Close()
+		wg.Done()
+	}()
+	wg.Wait()
+}
+
+// proxied proxies via an enproxy.Proxy
+func (c *Config) proxied(resp http.ResponseWriter, clientConn net.Conn, buffClientConn *bufio.ReadWriter, req *http.Request, addr string) {
+	// Establish outbound connection
 	proxyConn := &Conn{
 		Addr:   addr,
 		Config: c,
 	}
-	err = proxyConn.Connect()
+	err := proxyConn.Connect()
 	if err != nil {
 		BadGateway(clientConn, fmt.Sprintf("Unable to dial proxy: %s", err))
 		return
@@ -87,4 +119,9 @@ func hostIncludingPort(req *http.Request) string {
 	} else {
 		return req.Host
 	}
+}
+
+func isLoopback(addr string) bool {
+	ip, err := net.ResolveIPAddr("ip4", strings.Split(addr, ":")[0])
+	return err == nil && ip.IP.IsLoopback()
 }
