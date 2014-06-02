@@ -27,11 +27,11 @@ if err == nil {
 }
 ```
 
-To start a proxy server:
+To start the corresponding proxy server:
 
 ```go
 proxy := enproxy.NewProxy(0, 0)
-err := proxy.ListenAndServe(os.Args[1])
+err := proxy.ListenAndServe(proxyAddress)
 if err != nil {
   log.Fatalf("Unable to listen and serve: %s", err)
 }
