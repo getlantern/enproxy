@@ -18,6 +18,8 @@ const (
 // a convenience ListenAndServe() function for quickly starting up a dedicated
 // HTTP server using this Proxy as its handler.
 type Proxy struct {
+	Dial dialFunc
+
 	idleInterval time.Duration
 
 	bufferSize int
@@ -34,11 +36,20 @@ type Proxy struct {
 // bufferSize controls the size of the buffers used for copying data from
 // outbound to inbound connection.  If given as 0, defaults to
 // 8096 bytes.
-func NewProxy(idleInterval time.Duration, bufferSize int) *Proxy {
+//
+// dial specifies the function to use to dial the destination server.  If nil,
+// a default TCP dialer is used.
+func NewProxy(idleInterval time.Duration, bufferSize int, dial dialFunc) *Proxy {
 	if bufferSize == 0 {
 		bufferSize = DEFAULT_BUFFER_SIZE
 	}
+	if dial == nil {
+		dial = func(addr string) (net.Conn, error) {
+			return net.Dial("tcp", addr)
+		}
+	}
 	return &Proxy{
+		Dial:         dial,
 		idleInterval: idleInterval,
 		bufferSize:   bufferSize,
 		connMap:      make(map[string]net.Conn),
@@ -127,7 +138,7 @@ func (p *Proxy) connOutFor(req *http.Request) (connOut net.Conn, err error) {
 		}
 
 		// Dial out on first request
-		conn, err := net.Dial("tcp", addr)
+		conn, err := p.Dial(addr)
 		if err != nil {
 			return nil, fmt.Errorf("Unable to dial out to %s: %s", addr, err)
 		}

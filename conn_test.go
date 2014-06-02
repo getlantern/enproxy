@@ -118,7 +118,7 @@ func startProxy(t *testing.T) {
 		return
 	}
 	go func() {
-		proxy := NewProxy(0, 0)
+		proxy := NewProxy(0, 0, nil)
 		err := proxy.ListenAndServe(PROXY_ADDR)
 		if err != nil {
 			t.Fatalf("Unable to listen and serve: %s", err)
