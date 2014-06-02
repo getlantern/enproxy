@@ -29,6 +29,9 @@ func (c *Conn) Connect() error {
 
 	// Dial the proxy
 	err = c.dialProxy()
+	if err != nil {
+		return err
+	}
 
 	go c.process()
 	return nil
