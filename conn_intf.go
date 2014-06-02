@@ -39,28 +39,36 @@ var (
 //      move on to the next response.
 //   4. Go back to accepting writes (step 1)
 //   5. If no writes are received for more than PollInterval, issue an empty
-//      request in order to pick up any new data received on the proxy, start
+//      request in order to pick up any new data received by the proxy, start
 //      accepting reads (step 3)
 //
 type Conn struct {
-	Config *Config
-
-	writeRequests    chan []byte      // requests to write
-	writeResponses   chan rwResponse  // responses for writes
-	readRequests     chan []byte      // requests to read
-	readResponses    chan rwResponse  // responses for reads
-	lastActivityTime time.Time        // time of last read or write
-	stop             chan interface{} // stop notification
-	closedMutex      sync.RWMutex     // mutex controlling access to closed flag
-	closed           bool             // whether or not this Conn is closed
-
 	// Addr: the host:port of the destination server that we're trying to reach
 	Addr string
 
-	id              string         // unique identifier for this connection
-	netAddr         net.Addr       // the resolved net.Addr
-	proxyConn       net.Conn       // a underlying connection to the proxy
-	bufReader       *bufio.Reader  // buffered reader for proxyConn
+	// Config: configuration of this Conn
+	Config *Config
+
+	id string // unique identifier for this connection
+
+	/* Channels for processing reads, writes and closes */
+	writeRequests  chan []byte      // requests to write
+	writeResponses chan rwResponse  // responses for writes
+	readRequests   chan []byte      // requests to read
+	readResponses  chan rwResponse  // responses for reads
+	stop           chan interface{} // stop notification
+
+	/* Fields for tracking activity/closed status */
+	lastActivityTime time.Time    // time of last read or write
+	closedMutex      sync.RWMutex // mutex controlling access to closed flag
+	closed           bool         // whether or not this Conn is closed
+
+	/* Networking stuff */
+	netAddr   net.Addr      // the resolved net.Addr
+	proxyConn net.Conn      // the connection to the proxy
+	bufReader *bufio.Reader // buffered reader for proxyConn
+
+	/* Fields for tracking current request and response */
 	req             *http.Request  // the current request being used to send data
 	pipeReader      *io.PipeReader // pipe reader for current request body
 	pipeWriter      *io.PipeWriter // pipe writer to current request body
@@ -78,6 +86,7 @@ type rwResponse struct {
 	err error
 }
 
+// Config configures a Conn
 type Config struct {
 	// DialProxy: function to open a connection to the proxy
 	DialProxy dialFunc
@@ -97,6 +106,7 @@ type Config struct {
 	IdleInterval time.Duration
 }
 
+// LocalAddr() implements the function from net.Conn
 func (c *Conn) LocalAddr() net.Addr {
 	if c.proxyConn == nil {
 		return nil
@@ -105,10 +115,12 @@ func (c *Conn) LocalAddr() net.Addr {
 	}
 }
 
+// RemoveAddr() implements the function from net.Conn
 func (c *Conn) RemoteAddr() net.Addr {
 	return c.netAddr
 }
 
+// Write() implements the function from net.Conn
 func (c *Conn) Write(b []byte) (n int, err error) {
 	if c.isClosed() {
 		return 0, io.EOF
@@ -122,6 +134,7 @@ func (c *Conn) Write(b []byte) (n int, err error) {
 	}
 }
 
+// Read() implements the function from net.Conn
 func (c *Conn) Read(b []byte) (n int, err error) {
 	if c.isClosed() {
 		return 0, io.EOF
@@ -135,6 +148,7 @@ func (c *Conn) Read(b []byte) (n int, err error) {
 	}
 }
 
+// Close() implements the function from net.Conn
 func (c *Conn) Close() error {
 	if c.markClosed() {
 		c.stop <- true
@@ -142,14 +156,17 @@ func (c *Conn) Close() error {
 	return nil
 }
 
+// SetDeadline() is currently unimplemented.
 func (c *Conn) SetDeadline(t time.Time) error {
 	panic("SetDeadline not implemented")
 }
 
+// SetReadDeadline() is currently unimplemented.
 func (c *Conn) SetReadDeadline(t time.Time) error {
 	panic("SetReadDeadline not implemented")
 }
 
+// SetWriteDeadline() is currently unimplemented.
 func (c *Conn) SetWriteDeadline(t time.Time) error {
 	panic("SetWriteDeadline not implemented")
 }
