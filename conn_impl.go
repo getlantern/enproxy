@@ -39,7 +39,7 @@ func (c *Conn) Connect() error {
 }
 
 func (c *Conn) resolveAddress() (err error) {
-	c.netAddr, err = net.ResolveIPAddr("ip", c.Addr)
+	c.netAddr, err = net.ResolveIPAddr("ip", strings.Split(c.Addr, ":")[0])
 	if err != nil {
 		return fmt.Errorf("Unable to resolve address %s: %s", c.Addr, err)
 	}
