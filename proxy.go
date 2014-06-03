@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -24,7 +25,9 @@ type Proxy struct {
 
 	bufferSize int
 
-	connMap map[string]net.Conn // map of outbound connections by their id
+	connMap map[string]*lazyConn // map of outbound connections by their id
+
+	connMapMutex sync.Mutex // mutex for controlling access to connMap
 }
 
 // NewProxy sets up a new proxy.
@@ -52,7 +55,7 @@ func NewProxy(idleInterval time.Duration, bufferSize int, dial dialFunc) *Proxy 
 		Dial:         dial,
 		idleInterval: idleInterval,
 		bufferSize:   bufferSize,
-		connMap:      make(map[string]net.Conn),
+		connMap:      make(map[string]*lazyConn),
 	}
 }
 
@@ -70,30 +73,48 @@ func (p *Proxy) ListenAndServe(addr string) error {
 
 // ServeHTTP: implements the http.Handler interface.
 func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
-	connOut, err := p.connOutFor(req)
+	id := req.Header.Get(X_HTTPCONN_ID)
+	if id == "" {
+		resp.WriteHeader(BAD_GATEWAY)
+		fmt.Fprintf(resp, "No id found in header %s", X_HTTPCONN_ID)
+		return
+	}
+
+	addr := req.Header.Get(X_HTTPCONN_DEST_ADDR)
+	if addr == "" {
+		resp.WriteHeader(BAD_GATEWAY)
+		fmt.Fprintf(resp, "No address found in header %s", X_HTTPCONN_DEST_ADDR)
+		return
+	}
+
+	connOut, err := p.getLazyConn(id, addr).get()
 	if err != nil {
 		resp.WriteHeader(BAD_GATEWAY)
-		resp.Write([]byte(fmt.Sprintf("Unable to get connOut: %s", err)))
+		fmt.Fprintf(resp, "Unable to get connOut: %s", err)
 		return
 	}
 
 	// Read request
 	_, err = io.Copy(connOut, req.Body)
-	if err != nil && err != io.EOF {
+	if err != nil {
 		resp.WriteHeader(BAD_GATEWAY)
-		resp.Write([]byte(fmt.Sprintf("Unable to write to connOut: %s", err)))
+		fmt.Fprintf(resp, "Unable to write to connOut: %s", err)
 		connOut.Close()
+		return
 	}
 
 	// Write response
 	b := make([]byte, p.bufferSize)
 	for {
+		// Only block for idleInterval on reading
 		idleInterval := p.idleInterval
 		if idleInterval == 0 {
 			idleInterval = defaultIdleInterval
 		}
 		readDeadline := time.Now().Add(idleInterval)
 		connOut.SetReadDeadline(readDeadline)
+
+		// Read
 		n, readErr := connOut.Read(b)
 		if readErr == io.EOF {
 			// Reached EOF
@@ -110,10 +131,12 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 			switch e := readErr.(type) {
 			case net.Error:
 				if e.Timeout() {
-					// Return, but leave connOut open
+					// This means that we hit our idleInterval, which is okay
+					// Return response to client, but leave connOut open
 					return
 				}
 			default:
+				// Unexpected error, close outbound connection
 				connOut.Close()
 				return
 			}
@@ -121,34 +144,79 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	}
 }
 
-// connOutFor opens an outbound connection to the destination requested by the
-// given http.Request.
-func (p *Proxy) connOutFor(req *http.Request) (connOut net.Conn, err error) {
-	id := req.Header.Get(X_HTTPCONN_ID)
-	if id == "" {
-		return nil, fmt.Errorf("No id found in header %s", X_HTTPCONN_ID)
+// getLazyConn gets the lazyConn corresponding to the given id and addr
+func (p *Proxy) getLazyConn(id string, addr string) (l *lazyConn) {
+	p.connMapMutex.Lock()
+	defer p.connMapMutex.Unlock()
+	l = p.connMap[id]
+	if l == nil {
+		// Get destination address and build lazy conn
+
+		l = p.newLazyConn(id, addr)
+		p.connMap[id] = l
+	}
+	return
+}
+
+// lazyConn is a lazily initializing conn that makes sure it is only initialized
+// once.  Using these allows us to ensure that we only create one connection per
+// connection id, but to still support doing the Dial calls concurrently.
+type lazyConn struct {
+	getCh  chan interface{}
+	stopCh chan interface{}
+	respCh chan net.Conn
+	errCh  chan error
+}
+
+func (p *Proxy) newLazyConn(id string, addr string) *lazyConn {
+	l := &lazyConn{
+		getCh:  make(chan interface{}),
+		stopCh: make(chan interface{}),
+		respCh: make(chan net.Conn),
+		errCh:  make(chan error),
 	}
 
-	connOut = p.connMap[id]
-	if connOut == nil {
-		// Connect to destination
-		addr := req.Header.Get(X_HTTPCONN_DEST_ADDR)
-		if addr == "" {
-			return nil, fmt.Errorf("No address found in header %s", X_HTTPCONN_DEST_ADDR)
+	go func() {
+		var connOut net.Conn
+		var err error
+
+		for {
+			select {
+			case <-l.getCh:
+				if err != nil {
+					// Already had an error, just return that
+					l.errCh <- err
+				}
+
+				if connOut == nil {
+					// Lazily connect
+					conn, err := p.Dial(addr)
+					if err != nil {
+						err = fmt.Errorf("Unable to dial out to %s: %s", addr, err)
+						l.errCh <- err
+					}
+
+					// Wrap the connection in an idle timing one
+					connOut = withIdleTimeout(conn, defaultIdleTimeout, func() {
+						delete(p.connMap, id)
+						l.stopCh <- nil
+					})
+				}
+				l.respCh <- connOut
+			case <-l.stopCh:
+				return
+			}
 		}
+	}()
 
-		// Dial out on first request
-		conn, err := p.Dial(addr)
-		if err != nil {
-			return nil, fmt.Errorf("Unable to dial out to %s: %s", addr, err)
-		}
+	return l
+}
 
-		// Wrap the connection in an idle timing one
-		connOut = withIdleTimeout(conn, defaultIdleTimeout, func() {
-			delete(p.connMap, id)
-		})
-
-		p.connMap[id] = connOut
+func (l *lazyConn) get() (conn net.Conn, err error) {
+	l.getCh <- nil
+	select {
+	case conn = <-l.respCh:
+	case err = <-l.errCh:
 	}
 	return
 }
