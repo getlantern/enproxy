@@ -13,7 +13,9 @@ import (
 
 // Intercept intercepts a CONNECT request, hijacks the underlying client
 // connetion and starts piping the data over a new enproxy.Conn configured using
-// this Config.
+// this Config.  If shouldProxyLoopback is false, any requests to addresses that
+// are the loopback interface will be sent directly to the destination address,
+// bypassing the proxy.
 func (c *Config) Intercept(resp http.ResponseWriter, req *http.Request, shouldProxyLoopback bool) {
 	if req.Method != "CONNECT" {
 		panic("Intercept used for non-CONNECT request!")
@@ -25,6 +27,7 @@ func (c *Config) Intercept(resp http.ResponseWriter, req *http.Request, shouldPr
 		resp.WriteHeader(502)
 		fmt.Fprintf(resp, "Unable to hijack connection: %s", err)
 	}
+	defer clientConn.Close()
 
 	addr := hostIncludingPort(req)
 
