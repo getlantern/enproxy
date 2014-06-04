@@ -13,10 +13,8 @@ import (
 
 // Intercept intercepts a CONNECT request, hijacks the underlying client
 // connetion and starts piping the data over a new enproxy.Conn configured using
-// this Config.  If shouldProxyLoopback is false, any requests to addresses that
-// are the loopback interface will be sent directly to the destination address,
-// bypassing the proxy.
-func (c *Config) Intercept(resp http.ResponseWriter, req *http.Request, shouldProxyLoopback bool) {
+// this Config.
+func (c *Config) Intercept(resp http.ResponseWriter, req *http.Request) {
 	if req.Method != "CONNECT" {
 		panic("Intercept used for non-CONNECT request!")
 	}
@@ -30,34 +28,7 @@ func (c *Config) Intercept(resp http.ResponseWriter, req *http.Request, shouldPr
 	defer clientConn.Close()
 
 	addr := hostIncludingPort(req)
-
-	// Check for local addresses, which we proxy directly
-	if !shouldProxyLoopback && isLoopback(addr) {
-		c.direct(clientConn, addr)
-	} else {
-		c.proxied(resp, req, clientConn, buffClientConn, addr)
-	}
-}
-
-// direct pipes data directly to the requested address
-func (c *Config) direct(clientConn net.Conn, addr string) {
-	connOut, err := net.Dial("tcp", addr)
-	if err != nil {
-		BadGateway(clientConn, fmt.Sprintf("Unable to dial loopback address %s: %s", addr, err))
-		return
-	}
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		io.Copy(connOut, clientConn)
-		wg.Done()
-	}()
-	go func() {
-		io.Copy(clientConn, connOut)
-		connOut.Close()
-		wg.Done()
-	}()
-	wg.Wait()
+	c.proxied(resp, req, clientConn, buffClientConn, addr)
 }
 
 // proxied proxies via an enproxy.Proxy
@@ -122,9 +93,4 @@ func hostIncludingPort(req *http.Request) string {
 	} else {
 		return req.Host
 	}
-}
-
-func isLoopback(addr string) bool {
-	ip, err := net.ResolveIPAddr("ip4", strings.Split(addr, ":")[0])
-	return err == nil && ip.IP.IsLoopback()
 }
