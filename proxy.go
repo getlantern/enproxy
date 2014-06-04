@@ -162,63 +162,44 @@ func (p *Proxy) getLazyConn(id string, addr string) (l *lazyConn) {
 // once.  Using these allows us to ensure that we only create one connection per
 // connection id, but to still support doing the Dial calls concurrently.
 type lazyConn struct {
-	getCh  chan interface{}
-	stopCh chan interface{}
-	respCh chan net.Conn
-	errCh  chan error
+	p       *Proxy
+	id      string
+	addr    string
+	connOut net.Conn
+	err     error
+	mutex   sync.Mutex
 }
 
 func (p *Proxy) newLazyConn(id string, addr string) *lazyConn {
-	l := &lazyConn{
-		getCh:  make(chan interface{}),
-		stopCh: make(chan interface{}),
-		respCh: make(chan net.Conn),
-		errCh:  make(chan error),
+	return &lazyConn{
+		p:    p,
+		id:   id,
+		addr: addr,
 	}
-
-	go func() {
-		var connOut net.Conn
-		var err error
-
-		for {
-			select {
-			case <-l.getCh:
-				if err != nil {
-					// Already had an error, just return that
-					l.errCh <- err
-				}
-
-				if connOut == nil {
-					// Lazily connect
-					conn, err := p.Dial(addr)
-					if err != nil {
-						err = fmt.Errorf("Unable to dial out to %s: %s", addr, err)
-						l.errCh <- err
-					}
-
-					// Wrap the connection in an idle timing one
-					connOut = withIdleTimeout(conn, defaultIdleTimeout, func() {
-						delete(p.connMap, id)
-						l.stopCh <- nil
-					})
-				}
-				l.respCh <- connOut
-			case <-l.stopCh:
-				return
-			}
-		}
-	}()
-
-	return l
 }
 
 func (l *lazyConn) get() (conn net.Conn, err error) {
-	l.getCh <- nil
-	select {
-	case conn = <-l.respCh:
-	case err = <-l.errCh:
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	if l.err != nil {
+		// If dial already resulted in an error, return that
+		return nil, err
 	}
-	return
+	if l.connOut == nil {
+		// Lazily dial out
+		conn, err := l.p.Dial(l.addr)
+		if err != nil {
+			l.err = fmt.Errorf("Unable to dial out to %s: %s", l.addr, err)
+			return nil, l.err
+		}
+
+		// Wrap the connection in an idle timing one
+		l.connOut = withIdleTimeout(conn, defaultIdleTimeout, func() {
+			delete(l.p.connMap, l.id)
+		})
+	}
+
+	return l.connOut, l.err
 }
 
 // idleTimingConn is a net.Conn that wraps another net.Conn and that times out

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -17,12 +16,6 @@ import (
 // Connect opens a connection to the proxy and starts processing writes and
 // reads to this Conn.
 func (c *Conn) Connect() error {
-	// Make sure that we can resolve the destination address
-	err := c.resolveAddress()
-	if err != nil {
-		return err
-	}
-
 	// Generate a unique id for this connection.  This is used by the Proxy to
 	// associate requests from this connection to the corresponding outbound
 	// connection on the proxy side.
@@ -30,24 +23,16 @@ func (c *Conn) Connect() error {
 
 	c.defaultTimeouts()
 	c.makeChannels()
-	c.startIdleTimer()
+	c.markActive()
 
 	// Dial the proxy
-	err = c.dialProxy()
+	err := c.dialProxy()
 	if err != nil {
 		return err
 	}
 
 	// Start our run loop
 	go c.process()
-	return nil
-}
-
-func (c *Conn) resolveAddress() (err error) {
-	c.netAddr, err = net.ResolveIPAddr("ip", strings.Split(c.Addr, ":")[0])
-	if err != nil {
-		return fmt.Errorf("Unable to resolve destination address %s: %s", c.Addr, err)
-	}
 	return nil
 }
 
@@ -94,10 +79,6 @@ func (c *Conn) drainAndCloseChannels() {
 	}
 }
 
-func (c *Conn) startIdleTimer() {
-	c.lastActivityTime = time.Now()
-}
-
 func (c *Conn) dialProxy() (err error) {
 	c.proxyConn, err = c.Config.DialProxy(c.Addr)
 	if err != nil {
@@ -132,7 +113,7 @@ func (c *Conn) process() {
 				// Problem writing, stop processing
 				return
 			}
-		case <-time.After(c.Config.PollInterval):
+		case <-time.After(c.Config.IdleInterval):
 			if c.isIdle() {
 				// No activity for more than IdleTimeout, stop processing
 				return
@@ -202,10 +183,8 @@ func (c *Conn) processReads() (ok bool) {
 			}
 			if responseFinished {
 				// Close response and go back to processing writes
-				if c.resp != nil {
-					c.resp.Body.Close()
-					c.resp = nil
-				}
+				c.resp.Body.Close()
+				c.resp = nil
 				return true
 			}
 		case <-time.After(c.Config.IdleInterval):
@@ -235,10 +214,14 @@ func (c *Conn) processRead(b []byte) (n int, err error, responseFinished bool) {
 	// Read from response body
 	n, err = c.resp.Body.Read(b)
 	if err == io.EOF {
+		// We've reached EOF on this response body (not on the connection)
 		responseFinished = true
-		serverEOF := c.resp.Header.Get(X_HTTPCONN_EOF) != ""
-		if !serverEOF {
-			// Server thinks there may be more to read, suppress EOF to client.
+		proxyEOF := c.resp.Header.Get(X_HTTPCONN_EOF) != ""
+		if !proxyEOF {
+			// Just because we've reached EOF on this response body doesn't mean
+			// that destination server doesn't have more data to send via the
+			// proxy. Once the destination server has reached EOF, the proxy
+			// will let us know by setting X_HTTPCONN_EOF to true.
 			err = nil
 		}
 	}
@@ -247,7 +230,7 @@ func (c *Conn) processRead(b []byte) (n int, err error, responseFinished bool) {
 
 func (c *Conn) readNextResponse() (err error, responseFinished bool) {
 	if c.req != nil {
-		// Stop writing to request body
+		// Stop writing to request body to stop current request to server
 		c.reqBodyWriter.Close()
 	} else {
 		// Request was nil, meaning that we never wrote anything

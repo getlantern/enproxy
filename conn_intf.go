@@ -31,6 +31,9 @@ var (
 // the one used by meek, but different in that data is not encoded as JSON.
 // https://trac.torproject.org/projects/tor/wiki/doc/AChildsGardenOfPluggableTransports#Undertheencryption.
 //
+// enproxy doesn't support request pipelining, so new requests are only sent
+// after previous responses have been read.
+//
 // The basics flow is as follows:
 //   1. Accept writes, piping these to the proxy as the body of an http request
 //   2. Continue to pipe the writes until the pause between consecutive writes
@@ -64,7 +67,6 @@ type Conn struct {
 	closed           bool         // whether or not this Conn is closed
 
 	/* Networking stuff */
-	netAddr   net.Addr      // the resolved net.Addr
 	proxyConn net.Conn      // the connection to the proxy
 	bufReader *bufio.Reader // buffered reader for proxyConn
 
@@ -116,9 +118,9 @@ func (c *Conn) LocalAddr() net.Addr {
 	}
 }
 
-// RemoveAddr() implements the function from net.Conn
+// RemoteAddr() is not implemented
 func (c *Conn) RemoteAddr() net.Addr {
-	return c.netAddr
+	panic("RemoteAddr() not implemented")
 }
 
 // Write() implements the function from net.Conn
