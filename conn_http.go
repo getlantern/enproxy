@@ -66,7 +66,7 @@ func (c *Config) proxied(resp http.ResponseWriter, req *http.Request, clientConn
 	}
 	err := proxyConn.Connect()
 	if err != nil {
-		BadGateway(clientConn, fmt.Sprintf("Unable to dial proxy: %s", err))
+		BadGateway(clientConn, fmt.Sprintf("Unable to Connect to proxy: %s", err))
 		return
 	}
 	defer proxyConn.Close()

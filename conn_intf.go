@@ -13,6 +13,9 @@ const (
 	X_HTTPCONN_ID        = "X-HTTPConn-Id"
 	X_HTTPCONN_DEST_ADDR = "X-HTTPConn-Dest-Addr"
 	X_HTTPCONN_EOF       = "X-HTTPConn-EOF"
+
+	IMMEDIATE    = true
+	ASYNCHRONOUS = false
 )
 
 var (
@@ -49,11 +52,11 @@ type Conn struct {
 	id string // unique identifier for this connection
 
 	/* Channels for processing reads, writes and closes */
-	writeRequests  chan []byte      // requests to write
-	writeResponses chan rwResponse  // responses for writes
-	readRequests   chan []byte      // requests to read
-	readResponses  chan rwResponse  // responses for reads
-	stop           chan interface{} // stop notification
+	writeRequestsCh  chan []byte      // requests to write
+	writeResponsesCh chan rwResponse  // responses for writes
+	readRequestsCh   chan []byte      // requests to read
+	readResponsesCh  chan rwResponse  // responses for reads
+	closeCh          chan interface{} // close notification
 
 	/* Fields for tracking activity/closed status */
 	lastActivityTime time.Time    // time of last read or write
@@ -123,8 +126,8 @@ func (c *Conn) Write(b []byte) (n int, err error) {
 	if c.isClosed() {
 		return 0, io.EOF
 	}
-	c.writeRequests <- b
-	res, ok := <-c.writeResponses
+	c.writeRequestsCh <- b
+	res, ok := <-c.writeResponsesCh
 	if !ok {
 		return 0, io.EOF
 	} else {
@@ -137,8 +140,8 @@ func (c *Conn) Read(b []byte) (n int, err error) {
 	if c.isClosed() {
 		return 0, io.EOF
 	}
-	c.readRequests <- b
-	res, ok := <-c.readResponses
+	c.readRequestsCh <- b
+	res, ok := <-c.readResponsesCh
 	if !ok {
 		return 0, io.EOF
 	} else {
@@ -149,7 +152,7 @@ func (c *Conn) Read(b []byte) (n int, err error) {
 // Close() implements the function from net.Conn
 func (c *Conn) Close() error {
 	if c.markClosed() {
-		c.stop <- true
+		c.closeCh <- true
 	}
 	return nil
 }

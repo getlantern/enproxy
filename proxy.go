@@ -227,7 +227,7 @@ type idleTimingConn struct {
 	conn             net.Conn
 	idleTimeout      time.Duration
 	lastActivityTime time.Time
-	closed           chan bool
+	closedCh         chan bool
 }
 
 // withIdleTimeout creates a new idleTimingConn wrapping the given net.Conn.
@@ -241,7 +241,7 @@ func withIdleTimeout(conn net.Conn, idleTimeout time.Duration, onClose func()) *
 		conn:             conn,
 		idleTimeout:      idleTimeout,
 		lastActivityTime: time.Now(),
-		closed:           make(chan bool, 10),
+		closedCh:         make(chan bool, 10),
 	}
 
 	go func() {
@@ -255,7 +255,7 @@ func withIdleTimeout(conn net.Conn, idleTimeout time.Duration, onClose func()) *
 				if c.closeIfNecessary() {
 					return
 				}
-			case <-c.closed:
+			case <-c.closedCh:
 				return
 			}
 		}
@@ -281,7 +281,7 @@ func (c *idleTimingConn) Write(b []byte) (int, error) {
 }
 
 func (c *idleTimingConn) Close() error {
-	c.closed <- true
+	c.closedCh <- true
 	return c.conn.Close()
 }
 
