@@ -182,9 +182,11 @@ func (c *Conn) processReads() (ok bool) {
 				return false
 			}
 			if responseFinished {
-				// Close response and go back to processing writes
-				c.resp.Body.Close()
-				c.resp = nil
+				if c.resp != nil {
+					// Close response and go back to processing writes
+					c.resp.Body.Close()
+					c.resp = nil
+				}
 				return true
 			}
 		case <-time.After(c.Config.IdleInterval):
@@ -212,7 +214,12 @@ func (c *Conn) processRead(b []byte) (n int, err error, responseFinished bool) {
 	}
 
 	// Read from response body
-	n, err = c.resp.Body.Read(b)
+	if c.resp.Body == nil {
+		// No response body, treat like EOF
+		err = io.EOF
+	} else {
+		n, err = c.resp.Body.Read(b)
+	}
 	if err == io.EOF {
 		// We've reached EOF on this response body (not on the connection)
 		responseFinished = true
@@ -249,16 +256,16 @@ func (c *Conn) readNextResponse() (err error, responseFinished bool) {
 		}
 	}
 
+	// Clear request in preparation for future writes (which will set up
+	// their own request)
+	c.req = nil
+
 	// Read the next response
-	c.resp, err = http.ReadResponse(c.bufReader, c.req)
+	c.resp, err = http.ReadResponse(c.bufReader, nil)
 	if err != nil {
 		err = fmt.Errorf("Unable to read response from proxy: %s", err)
 		return
 	}
-
-	// Clear request in preparation for future writes (which will set up
-	// their own request)
-	c.req = nil
 
 	// Check response status
 	responseOK := c.resp.StatusCode >= 200 && c.resp.StatusCode < 300
