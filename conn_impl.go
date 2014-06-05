@@ -21,7 +21,7 @@ func (c *Conn) Connect() error {
 	// connection on the proxy side.
 	c.id = uuid.NewRandom().String()
 
-	c.defaultTimeouts()
+	c.initDefaults()
 	c.makeChannels()
 	c.markActive()
 
@@ -36,7 +36,7 @@ func (c *Conn) Connect() error {
 	return nil
 }
 
-func (c *Conn) defaultTimeouts() {
+func (c *Conn) initDefaults() {
 	if c.Config.PollInterval == 0 {
 		c.Config.PollInterval = defaultPollInterval
 	}
@@ -46,16 +46,22 @@ func (c *Conn) defaultTimeouts() {
 	if c.Config.IdleTimeout == 0 {
 		c.Config.IdleTimeout = defaultIdleTimeout
 	}
+	if c.Config.WriteQueueDepth == 0 {
+		c.Config.WriteQueueDepth = defaultWriteQueueDepth
+	}
+	if c.Config.ReadQueueDepth == 0 {
+		c.Config.ReadQueueDepth = defaultReadQueueDepth
+	}
 }
 
 // makeChannels makes all the channels that we need for processing read, write
 // and close requests on this connection.
 func (c *Conn) makeChannels() {
-	c.writeRequestsCh = make(chan []byte)
+	c.writeRequestsCh = make(chan []byte, c.Config.WriteQueueDepth)
 	c.writeResponsesCh = make(chan rwResponse)
-	c.readRequestsCh = make(chan []byte)
+	c.readRequestsCh = make(chan []byte, c.Config.ReadQueueDepth)
 	c.readResponsesCh = make(chan rwResponse)
-	c.closeCh = make(chan interface{}, 100)
+	c.closeCh = make(chan interface{}, c.Config.WriteQueueDepth)
 }
 
 // drainAndCloseChannels drains all inbound channels and then closes them, which
@@ -307,7 +313,7 @@ func (c *Conn) post(requestBody io.ReadCloser, writeImmediate bool) (err error) 
 		go func() {
 			c.lastRequestTime = time.Now()
 			err := c.req.Write(c.proxyConn)
-			if err != nil {
+			if err != nil && !c.isClosed() {
 				c.closeCh <- true
 			}
 		}()
