@@ -219,6 +219,11 @@ func (c *Conn) processRead(b []byte) (n int, err error, responseFinished bool) {
 		err = io.EOF
 	} else {
 		n, err = c.resp.Body.Read(b)
+		if err == nil {
+			// Read again (just in case we missed EOF the first time around, not
+			// sure why that would happen, but have seen it with TLS)
+			_, err = c.resp.Body.Read(emptyBuffer)
+		}
 	}
 	if err == io.EOF {
 		// We've reached EOF on this response body (not on the connection)

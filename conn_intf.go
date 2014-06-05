@@ -23,6 +23,8 @@ var (
 	defaultIdleInterval    = 5 * time.Millisecond
 	firstWriteIdleInterval = 1000 * time.Hour // just needs to be a really large value
 	defaultIdleTimeout     = 70 * time.Second
+
+	emptyBuffer = []byte{}
 )
 
 // Conn is a net.Conn that tunnels its data via an httpconn.Proxy using HTTP
