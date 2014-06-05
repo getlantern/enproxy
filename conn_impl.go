@@ -220,8 +220,11 @@ func (c *Conn) processRead(b []byte) (n int, err error, responseFinished bool) {
 	} else {
 		n, err = c.resp.Body.Read(b)
 		if err == nil {
-			// Read again (just in case we missed EOF the first time around, not
-			// sure why that would happen, but have seen it with TLS)
+			// Read again, just in case we missed EOF the first time around.
+			// The reason for this is that per the io.Reader interface, when
+			// Read() reaches EOF, it is allowed to return the number of bytes
+			// read and a nil error.  Subsequent calls to Read however must
+			// return EOF, so making the additional read
 			_, err = c.resp.Body.Read(emptyBuffer)
 		}
 	}
