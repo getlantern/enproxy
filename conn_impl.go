@@ -172,10 +172,8 @@ func (c *Conn) processReads() (ok bool) {
 		select {
 		case b := <-c.readRequestsCh:
 			haveReceivedReadRequest = true
+			c.markActive()
 			n, err, responseFinished := c.processRead(b)
-			if n > 0 {
-				c.markActive()
-			}
 			c.readResponsesCh <- rwResponse{n, err}
 			if err != nil {
 				// Error doing read, stop processing
