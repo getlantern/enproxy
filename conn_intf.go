@@ -19,11 +19,9 @@ const (
 )
 
 var (
-	defaultPollInterval    = 50 * time.Millisecond
-	defaultIdleInterval    = 5 * time.Millisecond
-	defaultIdleTimeout     = 70 * time.Second
-	defaultWriteQueueDepth = 100
-	defaultReadQueueDepth  = 100
+	defaultPollInterval = 25 * time.Millisecond
+	defaultIdleInterval = 25 * time.Millisecond
+	defaultIdleTimeout  = 70 * time.Second
 
 	emptyBuffer = []byte{}
 )
@@ -110,12 +108,6 @@ type Config struct {
 	// IdleInterval: how long to wait for the next write/read before switching
 	// to read/write (defaults to 5 milliseconds)
 	IdleInterval time.Duration
-
-	// WriteQueueDepth: how many write calls to queue up (defaults to 100)
-	WriteQueueDepth int
-
-	// ReadQueueDepth: how many read calls to queue up (defaults to 100)
-	ReadQueueDepth int
 }
 
 // LocalAddr() implements the function from net.Conn

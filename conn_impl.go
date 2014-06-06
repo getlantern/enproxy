@@ -46,22 +46,16 @@ func (c *Conn) initDefaults() {
 	if c.Config.IdleTimeout == 0 {
 		c.Config.IdleTimeout = defaultIdleTimeout
 	}
-	if c.Config.WriteQueueDepth == 0 {
-		c.Config.WriteQueueDepth = defaultWriteQueueDepth
-	}
-	if c.Config.ReadQueueDepth == 0 {
-		c.Config.ReadQueueDepth = defaultReadQueueDepth
-	}
 }
 
 // makeChannels makes all the channels that we need for processing read, write
 // and close requests on this connection.
 func (c *Conn) makeChannels() {
-	c.writeRequestsCh = make(chan []byte, c.Config.WriteQueueDepth)
+	c.writeRequestsCh = make(chan []byte)
 	c.writeResponsesCh = make(chan rwResponse)
-	c.readRequestsCh = make(chan []byte, c.Config.ReadQueueDepth)
+	c.readRequestsCh = make(chan []byte)
 	c.readResponsesCh = make(chan rwResponse)
-	c.closeCh = make(chan interface{}, c.Config.WriteQueueDepth)
+	c.closeCh = make(chan interface{})
 }
 
 // drainAndCloseChannels drains all inbound channels and then closes them, which
