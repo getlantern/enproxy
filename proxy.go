@@ -3,6 +3,7 @@ package enproxy
 import (
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -75,30 +76,26 @@ func (p *Proxy) ListenAndServe(addr string) error {
 func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	id := req.Header.Get(X_HTTPCONN_ID)
 	if id == "" {
-		resp.WriteHeader(BAD_GATEWAY)
-		fmt.Fprintf(resp, "No id found in header %s", X_HTTPCONN_ID)
+		badGateway(resp, fmt.Sprintf("No id found in header %s", X_HTTPCONN_ID))
 		return
 	}
 
 	addr := req.Header.Get(X_HTTPCONN_DEST_ADDR)
 	if addr == "" {
-		resp.WriteHeader(BAD_GATEWAY)
-		fmt.Fprintf(resp, "No address found in header %s", X_HTTPCONN_DEST_ADDR)
+		badGateway(resp, fmt.Sprintf("No address found in header %s", X_HTTPCONN_DEST_ADDR))
 		return
 	}
 
 	connOut, err := p.getLazyConn(id, addr).get()
 	if err != nil {
-		resp.WriteHeader(BAD_GATEWAY)
-		fmt.Fprintf(resp, "Unable to get connOut: %s", err)
+		badGateway(resp, fmt.Sprintf("Unable to get connOut: %s", err))
 		return
 	}
 
 	// Read request
 	_, err = io.Copy(connOut, req.Body)
 	if err != nil {
-		resp.WriteHeader(BAD_GATEWAY)
-		fmt.Fprintf(resp, "Unable to write to connOut: %s", err)
+		badGateway(resp, fmt.Sprintf("Unable to write to connOut: %s", err))
 		connOut.Close()
 		return
 	}
@@ -200,6 +197,13 @@ func (l *lazyConn) get() (conn net.Conn, err error) {
 	}
 
 	return l.connOut, l.err
+}
+
+func badGateway(resp http.ResponseWriter, msg string) {
+	log.Printf("Responding bad gateway: %s", msg)
+	resp.Header().Set("Connection", "close")
+	resp.WriteHeader(BAD_GATEWAY)
+	fmt.Fprintf(resp, "No id found in header %s", X_HTTPCONN_ID)
 }
 
 // idleTimingConn is a net.Conn that wraps another net.Conn and that times out
