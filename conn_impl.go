@@ -259,9 +259,6 @@ func (c *Conn) processRead(b []byte) (n int, err error, responseFinished bool) {
 	if c.resp == nil {
 		err, responseFinished = c.readNextResponse()
 		if err != nil || responseFinished {
-			if err != nil {
-				log.Printf("Error reading next response: %s", err)
-			}
 			return
 		}
 	}
