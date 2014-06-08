@@ -35,10 +35,7 @@ func main() {
 							Addr:   addr,
 							Config: enproxyConfig,
 						}
-						err := conn.Connect()
-						if err != nil {
-							return nil, err
-						}
+						conn.Connect()
 						return conn, nil
 					},
 				},
