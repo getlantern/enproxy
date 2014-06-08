@@ -63,10 +63,7 @@ func prepareConn(port int, t *testing.T) (conn *Conn) {
 			},
 		},
 	}
-	err := conn.Connect()
-	if err != nil {
-		t.Fatalf("Unable to connect: %s", err)
-	}
+	conn.Connect()
 	return
 }
 

@@ -38,11 +38,7 @@ func (c *Config) proxied(resp http.ResponseWriter, req *http.Request, clientConn
 		Addr:   addr,
 		Config: c,
 	}
-	err := proxyConn.Connect()
-	if err != nil {
-		BadGateway(clientConn, fmt.Sprintf("Unable to Connect to proxy: %s", err))
-		return
-	}
+	proxyConn.Connect()
 	defer proxyConn.Close()
 
 	pipeData(clientConn, buffClientConn, proxyConn, req)
@@ -71,7 +67,6 @@ func pipeData(clientConn net.Conn, buffClientConn *bufio.ReadWriter, proxyConn *
 	go func() {
 		defer wg.Done()
 		io.Copy(clientConn, proxyConn)
-		clientConn.Close()
 	}()
 	wg.Wait()
 }

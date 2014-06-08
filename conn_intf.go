@@ -1,7 +1,6 @@
 package enproxy
 
 import (
-	"bufio"
 	"io"
 	"net"
 	"net/http"
@@ -13,15 +12,13 @@ const (
 	X_HTTPCONN_ID        = "X-HTTPConn-Id"
 	X_HTTPCONN_DEST_ADDR = "X-HTTPConn-Dest-Addr"
 	X_HTTPCONN_EOF       = "X-HTTPConn-EOF"
-
-	IMMEDIATE    = true
-	ASYNCHRONOUS = false
 )
 
 var (
-	defaultPollInterval = 25 * time.Millisecond
-	defaultIdleInterval = 25 * time.Millisecond
-	defaultIdleTimeout  = 70 * time.Second
+	defaultPollInterval     = 25 * time.Millisecond
+	defaultIdleInterval     = 15 * time.Millisecond
+	defaultIdleTimeout      = 15 * time.Second
+	defaultProxyConnTimeout = 10 * time.Second
 
 	emptyBuffer = []byte{}
 )
@@ -56,20 +53,19 @@ type Conn struct {
 	id string // unique identifier for this connection
 
 	/* Channels for processing reads, writes and closes */
-	writeRequestsCh  chan []byte      // requests to write
-	writeResponsesCh chan rwResponse  // responses for writes
-	readRequestsCh   chan []byte      // requests to read
-	readResponsesCh  chan rwResponse  // responses for reads
-	closeCh          chan interface{} // close notification
+	writeRequestsCh   chan []byte         // requests to write
+	writeResponsesCh  chan rwResponse     // responses for writes
+	readRequestsCh    chan []byte         // requests to read
+	readResponsesCh   chan rwResponse     // responses for reads
+	nextRequestCh     chan *http.Request  // channel for next outgoing request
+	nextResponseCh    chan *http.Response // channel for next response
+	nextResponseErrCh chan error          // channel for error on next response
+	closeCh           chan interface{}    // close notification
 
 	/* Fields for tracking activity/closed status */
 	lastActivityTime time.Time    // time of last read or write
 	closedMutex      sync.RWMutex // mutex controlling access to closed flag
 	closed           bool         // whether or not this Conn is closed
-
-	/* Networking stuff */
-	proxyConn net.Conn      // the connection to the proxy
-	bufReader *bufio.Reader // buffered reader for proxyConn
 
 	/* Fields for tracking current request and response */
 	req             *http.Request  // the current request being used to send data
@@ -108,15 +104,15 @@ type Config struct {
 	// IdleInterval: how long to wait for the next write/read before switching
 	// to read/write (defaults to 5 milliseconds)
 	IdleInterval time.Duration
+
+	// ProxyConnTimout: how long to keep an outbound connection to the proxy open
+	// before reconnecting.
+	ProxyConnTimeout time.Duration
 }
 
-// LocalAddr() implements the function from net.Conn
+// LocalAddr() is not implemented
 func (c *Conn) LocalAddr() net.Addr {
-	if c.proxyConn == nil {
-		return nil
-	} else {
-		return c.proxyConn.LocalAddr()
-	}
+	panic("LocalAddr() not implemented")
 }
 
 // RemoteAddr() is not implemented
