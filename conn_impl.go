@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -16,7 +15,7 @@ import (
 
 // Connect opens a connection to the proxy and starts processing writes and
 // reads to this Conn.
-func (c *Conn) Connect() {
+func (c *Conn) Connect() (err error) {
 	// Generate a unique id for this connection.  This is used by the Proxy to
 	// associate requests from this connection to the corresponding outbound
 	// connection on the proxy side.
@@ -26,8 +25,10 @@ func (c *Conn) Connect() {
 	c.makeChannels()
 	c.markActive()
 
-	go c.processRW()
+	go c.processReadsAndWrites()
 	go c.postRequests()
+
+	return
 }
 
 func (c *Conn) initDefaults() {
@@ -39,9 +40,6 @@ func (c *Conn) initDefaults() {
 	}
 	if c.Config.IdleTimeout == 0 {
 		c.Config.IdleTimeout = defaultIdleTimeout
-	}
-	if c.Config.ProxyConnTimeout == 0 {
-		c.Config.ProxyConnTimeout = defaultProxyConnTimeout
 	}
 }
 
@@ -88,9 +86,62 @@ func (c *Conn) drainAndCloseChannels() {
 	}
 }
 
-// processRW is this connection's run loop, which processes writes and reads
-// until the Conn is closed
-func (c *Conn) processRW() {
+// postRequests handles writing outbound requests to the proxy and reading
+// responses.  Note - this is not pipelined, because we cannot be sure that
+// intervening proxies will deliver requests to the enproxy server in order.
+// In-order delivery is required because we are encapsulating a stream of data
+// inside the bodies of successive requests.
+func (c *Conn) postRequests() {
+	// Dial proxy
+	proxyConn, err := c.Config.DialProxy(c.Addr)
+	if err != nil {
+		log.Printf("Unable to dial proxy: %s", err)
+		c.Close()
+		return
+	}
+	defer proxyConn.Close()
+	bufReader := bufio.NewReader(proxyConn)
+
+	for {
+		req, ok := <-c.nextRequestCh
+		if !ok {
+			// done processing requests
+			return
+		}
+
+		c.lastRequestTime = time.Now()
+
+		// Write request
+		err := req.Write(proxyConn)
+		if err != nil {
+			c.nextResponseErrCh <- err
+			return
+		}
+
+		// Read corresponding response
+		resp, err := http.ReadResponse(bufReader, nil)
+		if err != nil {
+			c.nextResponseErrCh <- fmt.Errorf("Unable to read response from proxy: %s", err)
+			return
+		}
+
+		// Check response status
+		responseOK := resp.StatusCode >= 200 && resp.StatusCode < 300
+		if !responseOK {
+			respText := bytes.NewBuffer(nil)
+			resp.Write(respText)
+			c.nextResponseErrCh <- fmt.Errorf("Bad response status: %d\n\n", resp.StatusCode, string(respText.Bytes()))
+			return
+		}
+
+		// Response was good, publish it
+		c.nextResponseCh <- resp
+	}
+}
+
+// processReadsAndWrites is this connection's run loop, which processes writes
+// and reads until the Conn is closed
+func (c *Conn) processReadsAndWrites() {
 	defer func() {
 		// We've reached the end of our run loop, which means the connection is
 		// effectively closed.
@@ -277,76 +328,6 @@ func (c *Conn) readNextResponse() (err error, responseFinished bool) {
 	}
 
 	return
-}
-
-// postRequests handles writing outbound requests to the proxy and reading
-// responses.  Note - this is not pipelined, because we cannot be sure that
-// intervening proxies will deliver requests to the enproxy server in order.
-// In-order delivery is required because we are encapsulating a stream of data
-// inside the bodies of successive requests.
-func (c *Conn) postRequests() {
-	var proxyConn net.Conn
-	var bufReader *bufio.Reader
-	var lastConnected time.Time
-	var err error
-
-	for {
-		// Reconnect periodically, as intervening proxies may not keep the
-		// connection open forever even though we specified a persistent
-		// connection.
-		proxyConnTimedOut := time.Now().Sub(lastConnected) > c.Config.ProxyConnTimeout
-		if proxyConnTimedOut {
-			if proxyConn != nil {
-				// Close the old connection
-				proxyConn.Close()
-			}
-
-			// Dial out
-			proxyConn, err = c.Config.DialProxy(c.Addr)
-			if err != nil {
-				log.Printf("Unable to dial proxy: %s", err)
-				c.Close()
-				return
-			}
-			bufReader = bufio.NewReader(proxyConn)
-			defer proxyConn.Close()
-			lastConnected = time.Now()
-		}
-
-		req, ok := <-c.nextRequestCh
-		if !ok {
-			// done processing requests
-			return
-		}
-
-		c.lastRequestTime = time.Now()
-
-		// Write request
-		err = req.Write(proxyConn)
-		if err != nil {
-			c.nextResponseErrCh <- err
-			return
-		}
-
-		// Read corresponding response
-		resp, err := http.ReadResponse(bufReader, nil)
-		if err != nil {
-			c.nextResponseErrCh <- fmt.Errorf("Unable to read response from proxy: %s", err)
-			return
-		}
-
-		// Check response status
-		responseOK := resp.StatusCode >= 200 && resp.StatusCode < 300
-		if !responseOK {
-			respText := bytes.NewBuffer(nil)
-			resp.Write(respText)
-			c.nextResponseErrCh <- fmt.Errorf("Bad response status: %d\n\n", resp.StatusCode, string(respText.Bytes()))
-			return
-		}
-
-		// Response was good, publish it
-		c.nextResponseCh <- resp
-	}
 }
 
 // post posts a request with the given body to the proxy.  If writeImmediate is

@@ -15,10 +15,9 @@ const (
 )
 
 var (
-	defaultPollInterval     = 25 * time.Millisecond
-	defaultIdleInterval     = 15 * time.Millisecond
-	defaultIdleTimeout      = 15 * time.Second
-	defaultProxyConnTimeout = 10 * time.Second
+	defaultPollInterval = 50 * time.Millisecond
+	defaultIdleInterval = 15 * time.Millisecond
+	defaultIdleTimeout  = 15 * time.Second
 
 	emptyBuffer = []byte{}
 )
@@ -104,10 +103,6 @@ type Config struct {
 	// IdleInterval: how long to wait for the next write/read before switching
 	// to read/write (defaults to 5 milliseconds)
 	IdleInterval time.Duration
-
-	// ProxyConnTimout: how long to keep an outbound connection to the proxy open
-	// before reconnecting.
-	ProxyConnTimeout time.Duration
 }
 
 // LocalAddr() is not implemented
