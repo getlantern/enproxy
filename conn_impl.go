@@ -130,7 +130,7 @@ func (c *Conn) postRequests() {
 		if !responseOK {
 			respText := bytes.NewBuffer(nil)
 			resp.Write(respText)
-			c.nextResponseErrCh <- fmt.Errorf("Bad response status: %d\n\n", resp.StatusCode, string(respText.Bytes()))
+			c.nextResponseErrCh <- fmt.Errorf("Bad response status: %d\n%s\n", resp.StatusCode, string(respText.Bytes()))
 			return
 		}
 
