@@ -103,7 +103,7 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 
 	// Write response
 	b := make([]byte, p.BufferSize)
-	wroteHeader := false
+	first := true
 	for {
 		// Only block for idleInterval on reading
 		readDeadline := time.Now().Add(p.IdleInterval)
@@ -111,18 +111,17 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 
 		// Read
 		n, readErr := connOut.Read(b)
-		if readErr == io.EOF {
-			// Reached EOF
-			resp.Header().Set(X_HTTPCONN_EOF, "true")
-		}
-
-		// Write header if necessary
-		if !wroteHeader {
+		if first {
+			if readErr == io.EOF {
+				// Reached EOF
+				resp.Header().Set(X_HTTPCONN_EOF, "true")
+			}
+			// Always respond 200 OK
 			resp.WriteHeader(200)
-			wroteHeader = true
+			first = false
 		}
 
-		// Write any data read, irrespective of error
+		// Write if necessary
 		if n > 0 {
 			_, writeErr := resp.Write(b[:n])
 			if writeErr != nil {
@@ -131,7 +130,7 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 			}
 		}
 
-		// Handle read error
+		// Inspect readErr to decide whether or not to continue reading
 		if readErr != nil {
 			switch e := readErr.(type) {
 			case net.Error:
