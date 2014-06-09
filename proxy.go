@@ -20,49 +20,50 @@ const (
 // a convenience ListenAndServe() function for quickly starting up a dedicated
 // HTTP server using this Proxy as its handler.
 type Proxy struct {
+	// Dial: function used to dial the destination server.  If nil, a default
+	// TCP dialer is used.
 	Dial dialFunc
 
-	idleInterval time.Duration
+	// IdleInterval: how long to wait for the next write/read before switching
+	// to read/write (defaults to 15 milliseconds)
+	IdleInterval time.Duration
 
-	bufferSize int
+	// IdleTimeout: how long to wait before closing an idle connection, defaults
+	// to 70 seconds
+	IdleTimeout time.Duration
+
+	// BufferSize: controls the size of hte buffers used for copying data from
+	// outbound to inbound connections.  If given as 0, defaults to 8096 bytes.
+	BufferSize int
 
 	connMap map[string]*lazyConn // map of outbound connections by their id
 
 	connMapMutex sync.Mutex // mutex for controlling access to connMap
 }
 
-// NewProxy sets up a new proxy.
-//
-// idleInterval controls how long to wait for the next write before finishing
-// the current HTTP response to the client.  If given as 0, defaults to 10
-// seconds.
-//
-// bufferSize controls the size of the buffers used for copying data from
-// outbound to inbound connection.  If given as 0, defaults to
-// 8096 bytes.
-//
-// dial specifies the function to use to dial the destination server.  If nil,
-// a default TCP dialer is used.
-func NewProxy(idleInterval time.Duration, bufferSize int, dial dialFunc) *Proxy {
-	if bufferSize == 0 {
-		bufferSize = DEFAULT_BUFFER_SIZE
-	}
-	if dial == nil {
-		dial = func(addr string) (net.Conn, error) {
+// Start() starts this proxy
+func (p *Proxy) Start() {
+	if p.Dial == nil {
+		p.Dial = func(addr string) (net.Conn, error) {
 			return net.Dial("tcp", addr)
 		}
 	}
-	return &Proxy{
-		Dial:         dial,
-		idleInterval: idleInterval,
-		bufferSize:   bufferSize,
-		connMap:      make(map[string]*lazyConn),
+	if p.IdleInterval == 0 {
+		p.IdleInterval = defaultIdleInterval
 	}
+	if p.IdleTimeout == 0 {
+		p.IdleTimeout = defaultIdleTimeout
+	}
+	if p.BufferSize == 0 {
+		p.BufferSize = DEFAULT_BUFFER_SIZE
+	}
+	p.connMap = make(map[string]*lazyConn)
 }
 
 // ListenAndServe: convenience function for quickly starting up a dedicated HTTP
 // server using this Proxy as its handler.
 func (p *Proxy) ListenAndServe(addr string) error {
+	p.Start()
 	httpServer := &http.Server{
 		Addr:         addr,
 		Handler:      p,
@@ -92,7 +93,7 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Read request
+	// Pipe request
 	_, err = io.Copy(connOut, req.Body)
 	if err != nil {
 		badGateway(resp, fmt.Sprintf("Unable to write to connOut: %s", err))
@@ -101,14 +102,10 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	}
 
 	// Write response
-	b := make([]byte, p.bufferSize)
+	b := make([]byte, p.BufferSize)
 	for {
 		// Only block for idleInterval on reading
-		idleInterval := p.idleInterval
-		if idleInterval == 0 {
-			idleInterval = defaultIdleInterval
-		}
-		readDeadline := time.Now().Add(idleInterval)
+		readDeadline := time.Now().Add(p.IdleInterval)
 		connOut.SetReadDeadline(readDeadline)
 
 		// Read
@@ -116,6 +113,9 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 		if readErr == io.EOF {
 			// Reached EOF
 			resp.Header().Set(X_HTTPCONN_EOF, "true")
+		}
+		if readErr == nil {
+			resp.WriteHeader(200)
 		}
 		if n > 0 {
 			_, writeErr := resp.Write(b[:n])
@@ -159,12 +159,13 @@ func (p *Proxy) getLazyConn(id string, addr string) (l *lazyConn) {
 // once.  Using these allows us to ensure that we only create one connection per
 // connection id, but to still support doing the Dial calls concurrently.
 type lazyConn struct {
-	p       *Proxy
-	id      string
-	addr    string
-	connOut net.Conn
-	err     error
-	mutex   sync.Mutex
+	p           *Proxy
+	id          string
+	addr        string
+	idleTimeout time.Duration
+	connOut     net.Conn
+	err         error
+	mutex       sync.Mutex
 }
 
 func (p *Proxy) newLazyConn(id string, addr string) *lazyConn {
@@ -191,7 +192,7 @@ func (l *lazyConn) get() (conn net.Conn, err error) {
 		}
 
 		// Wrap the connection in an idle timing one
-		l.connOut = withIdleTimeout(conn, defaultIdleTimeout, func() {
+		l.connOut = withIdleTimeout(conn, l.p.IdleTimeout, func() {
 			delete(l.p.connMap, l.id)
 		})
 	}

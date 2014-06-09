@@ -92,17 +92,17 @@ type Config struct {
 	// NewRequest: function to create a new request to the proxy
 	NewRequest newRequestFunc
 
-	// IdleTimeout: how long to wait for a read before switching to writing,
-	// defaults to 70 seconds
-	IdleTimeout time.Duration
+	// IdleInterval: how long to wait for the next write/read before switching
+	// to read/write (defaults to 15 milliseconds)
+	IdleInterval time.Duration
 
 	// PollInterval: how frequently to poll (i.e. create a new request/response)
 	// , defaults to 50 ms
 	PollInterval time.Duration
 
-	// IdleInterval: how long to wait for the next write/read before switching
-	// to read/write (defaults to 5 milliseconds)
-	IdleInterval time.Duration
+	// IdleTimeout: how long to wait before closing an idle connection, defaults
+	// to 70 seconds
+	IdleTimeout time.Duration
 }
 
 // LocalAddr() is not implemented
