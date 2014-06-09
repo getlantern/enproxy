@@ -165,7 +165,6 @@ func (c *Conn) processReadsAndWrites() {
 			}
 		case <-time.After(c.Config.IdleInterval):
 			if c.isIdle() {
-				log.Println("Closing idle connection")
 				// No activity for more than IdleTimeout, stop processing
 				return
 			}
@@ -229,7 +228,6 @@ func (c *Conn) processReads() (ok bool) {
 			}
 			c.readResponsesCh <- rwResponse{n, err}
 			if err != nil {
-				log.Printf("Error processing read: %s", err)
 				// Error doing read, stop processing
 				return false
 			}
