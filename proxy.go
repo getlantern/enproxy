@@ -220,7 +220,6 @@ type idleTimingConn struct {
 	conn             net.Conn
 	idleTimeout      time.Duration
 	lastActivityTime time.Time
-	activeMutex      sync.Mutex
 	closedCh         chan bool
 }
 
@@ -300,14 +299,10 @@ func (c *idleTimingConn) SetWriteDeadline(t time.Time) error {
 }
 
 func (c *idleTimingConn) markActive() {
-	c.activeMutex.Lock()
-	defer c.activeMutex.Unlock()
 	c.lastActivityTime = time.Now()
 }
 
 func (c *idleTimingConn) closeIfNecessary() bool {
-	c.activeMutex.Lock()
-	defer c.activeMutex.Unlock()
 	if time.Now().Sub(c.lastActivityTime) > c.idleTimeout {
 		c.Close()
 		return true
