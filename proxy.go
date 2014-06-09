@@ -261,7 +261,7 @@ func withIdleTimeout(conn net.Conn, idleTimeout time.Duration, onClose func()) *
 func (c *idleTimingConn) Read(b []byte) (int, error) {
 	n, err := c.conn.Read(b)
 	if n > 0 {
-		c.lastActivityTime = time.Now()
+		c.markActive()
 	}
 	return n, err
 }
@@ -269,7 +269,7 @@ func (c *idleTimingConn) Read(b []byte) (int, error) {
 func (c *idleTimingConn) Write(b []byte) (int, error) {
 	n, err := c.conn.Write(b)
 	if n > 0 {
-		c.lastActivityTime = time.Now()
+		c.markActive()
 	}
 	return n, err
 }
