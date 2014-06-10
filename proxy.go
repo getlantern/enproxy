@@ -17,15 +17,15 @@ const (
 )
 
 var (
-	defaultFirstReadLatency  = 250 * time.Millisecond
-	defaultSecondReadLatency = 100 * time.Millisecond
+	defaultFirstReadTime      = 250 * time.Millisecond
+	defaultSubsequentReadTime = 100 * time.Millisecond
 
-	defaultFirstReadLatencies = map[string]time.Duration{
+	defaultFirstReadTimes = map[string]time.Duration{
 		"443":  defaultIdleInterval,
 		"5222": defaultIdleInterval,
 	}
 
-	defaultSecondReadLatencies = map[string]time.Duration{
+	defaultSubsequentReadTimes = map[string]time.Duration{
 		"443":  defaultIdleInterval,
 		"5222": defaultIdleInterval,
 	}
@@ -52,9 +52,9 @@ type Proxy struct {
 
 	connMapMutex sync.Mutex // mutex for controlling access to connMap
 
-	latencyProfilesByAddr map[string]*latencyProfile // profiles of latency for sites we've accessed
+	readTimingsByAddr map[string]*readTimings // profiles of read timings for sites we've accessed
 
-	latencyMutex sync.Mutex // mutex controlling access to latencyProfilesByAddr
+	readTimingsMutex sync.Mutex // mutex controlling access to readTimingsByAddr
 }
 
 // Start() starts this proxy
@@ -71,7 +71,9 @@ func (p *Proxy) Start() {
 		p.BufferSize = DEFAULT_BUFFER_SIZE
 	}
 	p.connMap = make(map[string]*lazyConn)
-	p.latencyProfilesByAddr = make(map[string]*latencyProfile)
+	p.readTimingsByAddr = make(map[string]*readTimings)
+
+	go p.logReadTimings()
 }
 
 // ListenAndServe: convenience function for quickly starting up a dedicated HTTP
@@ -115,8 +117,8 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Track latencies
-	lp := p.getLatencyProfile(addr)
+	// Track read timings
+	rt := p.getReadTimings(addr)
 
 	// Write response
 	b := make([]byte, p.BufferSize)
@@ -124,11 +126,9 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	for {
 		var idleTimeout time.Duration
 		if first {
-			idleTimeout = lp.firstRead.estimate() * 2
-			log.Printf("First read timeout for %s: %s", addr, idleTimeout)
+			idleTimeout = rt.first.estimate() * 2
 		} else {
-			idleTimeout = lp.secondRead.estimate() * 2
-			log.Printf("Second read timeout for %s: %s", addr, idleTimeout)
+			idleTimeout = rt.subsequent.estimate() * 2
 		}
 		readDeadline := time.Now().Add(idleTimeout)
 		connOut.SetReadDeadline(readDeadline)
@@ -137,7 +137,7 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 		startOfRead := time.Now()
 		n, readErr := connOut.Read(b)
 		// Remember read duration
-		latency := time.Now().Sub(startOfRead)
+		readTime := time.Now().Sub(startOfRead)
 		if first {
 			if readErr == io.EOF {
 				// Reached EOF
@@ -149,9 +149,9 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 		}
 		if n > 0 {
 			if first {
-				lp.firstRead.record(latency)
+				rt.first.record(readTime)
 			} else {
-				lp.secondRead.record(latency)
+				rt.subsequent.record(readTime)
 			}
 		}
 
@@ -194,26 +194,35 @@ func (p *Proxy) getLazyConn(id string, addr string) (l *lazyConn) {
 	return
 }
 
-// getLatencyProfile gets the latencyProfile for the specified addr, creating a
+// getReadTimings gets the readTimings for the specified addr, creating a
 // new one if necessary.
-func (p *Proxy) getLatencyProfile(addr string) *latencyProfile {
-	p.latencyMutex.Lock()
-	defer p.latencyMutex.Unlock()
-	lp, found := p.latencyProfilesByAddr[addr]
+func (p *Proxy) getReadTimings(addr string) *readTimings {
+	p.readTimingsMutex.Lock()
+	defer p.readTimingsMutex.Unlock()
+	lp, found := p.readTimingsByAddr[addr]
 	if !found {
 		port := strings.Split(addr, ":")[1]
-		firstReadLatency, found := defaultFirstReadLatencies[port]
+		first, found := defaultFirstReadTimes[port]
 		if !found {
-			firstReadLatency = defaultFirstReadLatency
+			first = defaultFirstReadTime
 		}
-		secondReadLatency, found := defaultSecondReadLatencies[port]
+		subsequent, found := defaultSubsequentReadTimes[port]
 		if !found {
-			secondReadLatency = defaultSecondReadLatency
+			subsequent = defaultSubsequentReadTime
 		}
-		lp = newLatencyProfile(firstReadLatency, secondReadLatency)
-		p.latencyProfilesByAddr[addr] = lp
+		lp = newReadTimings(first, subsequent)
+		p.readTimingsByAddr[addr] = lp
 	}
 	return lp
+}
+
+func (p *Proxy) logReadTimings() {
+	for {
+		time.Sleep(10 * time.Second)
+		for addr, readTimings := range p.readTimingsByAddr {
+			log.Printf("ReadTimings for %s -- %s", addr, readTimings)
+		}
+	}
 }
 
 func badGateway(resp http.ResponseWriter, msg string) {
