@@ -15,10 +15,14 @@ const (
 )
 
 var (
-	defaultPollInterval    = 50 * time.Millisecond
-	defaultIdleInterval    = 15 * time.Millisecond
-	defaultMaxIdleInterval = 1000 * time.Millisecond
-	defaultIdleTimeout     = 70 * time.Second
+	defaultPollInterval           = 50 * time.Millisecond
+	defaultIdleInterval           = 15 * time.Millisecond
+	defaultMaxIdleInterval        = 1000 * time.Millisecond
+	defaultMaxIdleIntervalsByPort = map[string]time.Duration{
+		"443":  100 * time.Millisecond,
+		"5222": 100 * time.Millisecond,
+	}
+	defaultIdleTimeout = 70 * time.Second
 
 	emptyBuffer = []byte{}
 )
