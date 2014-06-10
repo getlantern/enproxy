@@ -115,9 +115,9 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 
 		// Read
 		n, readErr := connOut.Read(b)
-		timeToFirstRead := time.Now().Sub(start)
-		log.Printf("Time to first read was: %s", timeToFirstRead)
 		if first {
+			timeToFirstRead := time.Now().Sub(start)
+			log.Printf("Time to first read was: %s", timeToFirstRead)
 			if readErr == io.EOF {
 				// Reached EOF
 				resp.Header().Set(X_HTTPCONN_EOF, "true")
