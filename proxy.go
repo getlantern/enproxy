@@ -124,7 +124,7 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	start := time.Now()
 	for {
 		// Figure out our read deadline as the min of p.MaxIdleInterval or
-		// twice the time to first read (if known).  lc.estimatedLatency
+		// twice the estimated latency (if known).  lc.estimatedLatency
 		// provides an approximation for latency, which allows us to make the
 		// idleInterval sensitive to the particular host being accessed.
 		var idleInterval time.Duration
@@ -151,7 +151,7 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 				// Remember how long it took to do our first read to use that
 				// to drive our idleInterval
 				lc.estimatedLatency = time.Now().Sub(start)
-				log.Printf("Time to first read for %s was: %s", addr, lc.estimatedLatency)
+				log.Printf("Estimated latency for %s was: %s.  idleInterval is: %s", addr, lc.estimatedLatency, idleInterval)
 			}
 			if readErr == io.EOF {
 				// Reached EOF
