@@ -25,8 +25,8 @@ type Proxy struct {
 	Dial dialFunc
 
 	// MaxIdleInterval: maximum amount of time to wait for the next read before
-	// returning a response (defaults to 500ms).  Note - the actual idleInterval
-	// may be lower if enproxy detects a lower latency to the upstream server.
+	// returning a response (defaults to 100ms).  The actual idleInterval will
+	// lower if enproxy detects a lower latency to the upstream server.
 	MaxIdleInterval time.Duration
 
 	// IdleTimeout: how long to wait before closing an idle connection, defaults
@@ -109,7 +109,9 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	start := time.Now()
 	for {
 		// Figure out our read deadline as the min of p.MaxIdleInterval or
-		// twice the time to first read (if known)
+		// twice the time to first read (if known).  lc.timeToFirstRead provides
+		// an approximation for latency, which allows us to make the
+		// idleInterval sensitive to the particular host being accessed.
 		idleInterval := p.MaxIdleInterval
 		if !first {
 			alternateIdleInterval := lc.timeToFirstRead * 2
