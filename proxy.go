@@ -125,8 +125,10 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 		var idleTimeout time.Duration
 		if first {
 			idleTimeout = lp.firstRead.estimate()
+			log.Printf("First read timeout: %s", idleTimeout)
 		} else {
 			idleTimeout = lp.secondRead.estimate()
+			log.Printf("Second read timeout: %s", idleTimeout)
 		}
 		readDeadline := time.Now().Add(idleTimeout)
 		connOut.SetReadDeadline(readDeadline)
