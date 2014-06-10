@@ -6,7 +6,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 )
@@ -14,6 +13,11 @@ import (
 const (
 	BAD_GATEWAY         = 502
 	DEFAULT_BUFFER_SIZE = 8096
+)
+
+var (
+	defaultReadTimeout       = 5 * time.Second
+	defaultProxyIdleInterval = 100 * time.Millisecond
 )
 
 // Proxy is the server side to an enproxy.Client.  Proxy implements the
@@ -25,14 +29,14 @@ type Proxy struct {
 	// TCP dialer is used.
 	Dial dialFunc
 
-	// MaxIdleInterval: maximum amount of time to wait for the next read before
-	// returning a response (defaults to 1000ms).  The actual idleInterval will
-	// lower if enproxy detects a lower latency to the upstream server.
-	MaxIdleInterval time.Duration
+	// ReadTimeout: maximum amount of time to wait for the first read before
+	// returning an empty response (defaults to 5 seconds).
+	ReadTimeout time.Duration
 
-	// MaxIdleIntervalByPort: overrides MaxIdleInterval for connections to
-	// specific ports.
-	MaxIdleIntervalByPort map[string]time.Duration
+	// IdleInterval: how long to wait for subsequent reads (defaults to 100ms).
+	// The actual interval may be lower than this if enproxy detects faster
+	// reads.
+	IdleInterval time.Duration
 
 	// IdleTimeout: how long to wait before closing an idle connection, defaults
 	// to 70 seconds
@@ -54,18 +58,11 @@ func (p *Proxy) Start() {
 			return net.Dial("tcp", addr)
 		}
 	}
-	if p.MaxIdleInterval == 0 {
-		p.MaxIdleInterval = defaultMaxIdleInterval
+	if p.ReadTimeout == 0 {
+		p.ReadTimeout = defaultReadTimeout
 	}
-	if p.MaxIdleIntervalByPort == nil {
-		p.MaxIdleIntervalByPort = make(map[string]time.Duration)
-	}
-	for port, idleInterval := range defaultMaxIdleIntervalsByPort {
-		_, exists := p.MaxIdleIntervalByPort[port]
-		if !exists {
-			// Merge default into map
-			p.MaxIdleIntervalByPort[port] = idleInterval
-		}
+	if p.IdleInterval == 0 {
+		p.IdleInterval = defaultProxyIdleInterval
 	}
 	if p.IdleTimeout == 0 {
 		p.IdleTimeout = defaultIdleTimeout
@@ -121,38 +118,29 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	// Write response
 	b := make([]byte, p.BufferSize)
 	first := true
-	start := time.Now()
 	for {
-		// Figure out our read deadline as the min of p.MaxIdleInterval or
-		// twice the estimated latency (if known).  lc.estimatedLatency
-		// provides an approximation for latency, which allows us to make the
-		// idleInterval sensitive to the particular host being accessed.
-		var idleInterval time.Duration
+		// Set the read timeout by the following rules:
+		//
+		//     If first read, use p.ReadTimeout
+		//     If second read, use p.IdleInterval
+		//     If third or subsequent read, use lc.lastReadDuration * 2
+		//
+		var timeout time.Duration
 		if first {
-			var found bool
-			port := strings.Split(addr, ":")[1]
-			idleInterval, found = p.MaxIdleIntervalByPort[port]
-			if !found {
-				idleInterval = p.MaxIdleInterval
-			}
+			timeout = p.ReadTimeout
 		} else {
-			alternateIdleInterval := lc.estimatedLatency * 2
-			if alternateIdleInterval < idleInterval {
-				idleInterval = alternateIdleInterval
+			timeout = lc.lastReadDuration * 2
+			if timeout == 0 {
+				timeout = p.IdleInterval
 			}
 		}
-		readDeadline := time.Now().Add(idleInterval)
+		readDeadline := time.Now().Add(timeout)
 		connOut.SetReadDeadline(readDeadline)
 
 		// Read
+		startOfRead := time.Now()
 		n, readErr := connOut.Read(b)
 		if first {
-			if lc.estimatedLatency == 0 {
-				// Remember how long it took to do our first read to use that
-				// to drive our idleInterval
-				lc.estimatedLatency = time.Now().Sub(start)
-				log.Printf("Estimated latency for %s was: %s.  idleInterval is: %s", addr, lc.estimatedLatency, idleInterval)
-			}
 			if readErr == io.EOF {
 				// Reached EOF
 				resp.Header().Set(X_HTTPCONN_EOF, "true")
@@ -160,6 +148,15 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 			// Always respond 200 OK
 			resp.WriteHeader(200)
 			first = false
+		} else {
+			// Remember read duration
+			lastReadDuration := time.Now().Sub(startOfRead)
+			if lc.lastReadDuration == 0 {
+				// Remember how long it took to do our first read to use that
+				// to drive our idleInterval
+				log.Printf("2nd read duration for %s was: %s.", addr, lc.lastReadDuration)
+			}
+			lc.lastReadDuration = lastReadDuration
 		}
 
 		// Write if necessary
@@ -195,8 +192,6 @@ func (p *Proxy) getLazyConn(id string, addr string) (l *lazyConn) {
 	defer p.connMapMutex.Unlock()
 	l = p.connMap[id]
 	if l == nil {
-		// Get destination address and build lazy conn
-
 		l = p.newLazyConn(id, addr)
 		p.connMap[id] = l
 	}
@@ -210,7 +205,7 @@ type lazyConn struct {
 	p                *Proxy
 	id               string
 	addr             string
-	estimatedLatency time.Duration
+	lastReadDuration time.Duration
 	connOut          net.Conn
 	err              error
 	mutex            sync.Mutex
