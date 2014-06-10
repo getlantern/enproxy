@@ -134,6 +134,11 @@ func (c *Conn) postRequests() {
 			return
 		}
 
+		proxyHost := resp.Header.Get(X_HTTPCONN_PROXY_HOST)
+		if proxyHost != "" {
+			c.proxyHost = proxyHost
+		}
+
 		// Response was good, publish it
 		c.nextResponseCh <- resp
 	}
@@ -331,7 +336,7 @@ func (c *Conn) readNextResponse() (err error, responseFinished bool) {
 // true, the request is written before post returns.  Otherwise, the request is
 // written on a goroutine and post returns immediately.
 func (c *Conn) post(requestBody io.ReadCloser) (err error) {
-	c.req, err = c.Config.NewRequest("POST", requestBody)
+	c.req, err = c.Config.NewRequest(c.proxyHost, "POST", requestBody)
 	if err != nil {
 		return fmt.Errorf("Unable to construct request to proxy: %s", err)
 	}

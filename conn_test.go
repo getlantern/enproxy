@@ -58,8 +58,11 @@ func prepareConn(port int, t *testing.T) (conn *Conn) {
 			DialProxy: func(addr string) (net.Conn, error) {
 				return net.Dial("tcp", PROXY_ADDR)
 			},
-			NewRequest: func(method string, body io.Reader) (req *http.Request, err error) {
-				return http.NewRequest(method, "http://"+PROXY_ADDR, body)
+			NewRequest: func(host string, method string, body io.Reader) (req *http.Request, err error) {
+				if host == "" {
+					host = PROXY_ADDR
+				}
+				return http.NewRequest(method, "http://"+host, body)
 			},
 		},
 	}

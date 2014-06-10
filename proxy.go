@@ -16,20 +16,24 @@ const (
 )
 
 // Proxy is the server side to an enproxy.Client.  Proxy implements the
-// http.Hander interface for plugging into an HTTP server, and it also provides
-// a convenience ListenAndServe() function for quickly starting up a dedicated
-// HTTP server using this Proxy as its handler.
+// http.Handler interface for plugging into an HTTP server, and it also
+// provides a convenience ListenAndServe() function for quickly starting up
+// a dedicated HTTP server using this Proxy as its handler.
 type Proxy struct {
 	// Dial: function used to dial the destination server.  If nil, a default
 	// TCP dialer is used.
 	Dial dialFunc
+
+	// Host: FQDN that is guaranteed to hit this particular proxy.  Required
+	// if this server was originally reached by e.g. DNS round robin.
+	Host string
 
 	// IdleInterval: how long to wait for the next write/read before switching
 	// to read/write (defaults to 15 milliseconds)
 	IdleInterval time.Duration
 
 	// IdleTimeout: how long to wait before closing an idle connection, defaults
-	// to 70 seconds
+	// to 5 seconds
 	IdleTimeout time.Duration
 
 	// BufferSize: controls the size of hte buffers used for copying data from
@@ -115,6 +119,12 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 			if readErr == io.EOF {
 				// Reached EOF
 				resp.Header().Set(X_HTTPCONN_EOF, "true")
+			}
+			if p.Host != "" {
+				// Always feed this so clients will be guaranteed to reach
+				// this particular proxy even if they originally reached us
+				// through (e.g.) DNS round robin.
+				resp.Header().Set(X_HTTPCONN_PROXY_HOST, p.Host)
 			}
 			// Always respond 200 OK
 			resp.WriteHeader(200)
