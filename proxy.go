@@ -127,7 +127,7 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 				// Remember how long it took to do our first read to use that
 				// to drive our idleInterval
 				lc.timeToFirstRead = time.Now().Sub(start)
-				log.Printf("Time to first read was: %s", lc.timeToFirstRead)
+				log.Printf("Time to first read for %s was: %s", addr, lc.timeToFirstRead)
 			}
 			if readErr == io.EOF {
 				// Reached EOF
