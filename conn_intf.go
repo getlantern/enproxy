@@ -17,13 +17,7 @@ const (
 var (
 	defaultPollInterval = 50 * time.Millisecond
 	defaultIdleInterval = 15 * time.Millisecond
-	defaultIdleTimeout  = 5 * time.Second
-	// IMPORTANT - if defaultIdleTimeout is set too high, the upstream server
-	// (e.g. CloudFlare) may actually close the connection on us, resulting in
-	// errors trying to read the response.  5 seconds seems to be a good value
-	// for CloudFlare. See
-	// https://code.google.com/p/chromium/issues/detail?id=84313 for a
-	// discussion of this type of problem in the context of Chrome.
+	defaultIdleTimeout  = 70 * time.Second
 
 	emptyBuffer = []byte{}
 )

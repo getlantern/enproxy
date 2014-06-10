@@ -104,13 +104,19 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	// Write response
 	b := make([]byte, p.BufferSize)
 	first := true
+	start := time.Now()
+	var timeToFirstRead time.Duration
 	for {
-		// Only block for idleInterval on reading
-		readDeadline := time.Now().Add(p.IdleInterval)
-		connOut.SetReadDeadline(readDeadline)
+		if !first {
+			// Only block as long as first read on reading
+			readDeadline := time.Now().Add(timeToFirstRead)
+			connOut.SetReadDeadline(readDeadline)
+		}
 
 		// Read
 		n, readErr := connOut.Read(b)
+		timeToFirstRead := time.Now().Sub(start)
+		log.Printf("Time to first read was: %s", timeToFirstRead)
 		if first {
 			if readErr == io.EOF {
 				// Reached EOF
