@@ -28,9 +28,10 @@ type Proxy struct {
 	// if this server was originally reached by e.g. DNS round robin.
 	Host string
 
-	// IdleInterval: how long to wait for the next write/read before switching
-	// to read/write (defaults to 15 milliseconds)
-	IdleInterval time.Duration
+	// MaxIdleInterval: maximum amount of time to wait for the next read before
+	// returning a response (defaults to 100ms).  The actual idleInterval will
+	// lower if enproxy detects a lower latency to the upstream server.
+	MaxIdleInterval time.Duration
 
 	// IdleTimeout: how long to wait before closing an idle connection, defaults
 	// to 5 seconds
@@ -52,8 +53,8 @@ func (p *Proxy) Start() {
 			return net.Dial("tcp", addr)
 		}
 	}
-	if p.IdleInterval == 0 {
-		p.IdleInterval = defaultIdleInterval
+	if p.MaxIdleInterval == 0 {
+		p.MaxIdleInterval = defaultMaxIdleInterval
 	}
 	if p.IdleTimeout == 0 {
 		p.IdleTimeout = defaultIdleTimeout
@@ -91,7 +92,8 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	connOut, err := p.getLazyConn(id, addr).get()
+	lc := p.getLazyConn(id, addr)
+	connOut, err := lc.get()
 	if err != nil {
 		badGateway(resp, fmt.Sprintf("Unable to get connOut: %s", err))
 		return
@@ -108,14 +110,31 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	// Write response
 	b := make([]byte, p.BufferSize)
 	first := true
+	start := time.Now()
 	for {
-		// Only block for idleInterval on reading
-		readDeadline := time.Now().Add(p.IdleInterval)
+		// Figure out our read deadline as the min of p.MaxIdleInterval or
+		// twice the time to first read (if known).  lc.timeToFirstRead provides
+		// an approximation for latency, which allows us to make the
+		// idleInterval sensitive to the particular host being accessed.
+		idleInterval := p.MaxIdleInterval
+		if !first {
+			alternateIdleInterval := lc.timeToFirstRead * 2
+			if alternateIdleInterval < idleInterval {
+				idleInterval = alternateIdleInterval
+			}
+		}
+		readDeadline := time.Now().Add(idleInterval)
 		connOut.SetReadDeadline(readDeadline)
 
 		// Read
 		n, readErr := connOut.Read(b)
 		if first {
+			if lc.timeToFirstRead == 0 {
+				// Remember how long it took to do our first read to use that
+				// to drive our idleInterval
+				lc.timeToFirstRead = time.Now().Sub(start)
+				log.Printf("Time to first read for %s was: %s", addr, lc.timeToFirstRead)
+			}
 			if readErr == io.EOF {
 				// Reached EOF
 				resp.Header().Set(X_HTTPCONN_EOF, "true")
@@ -176,13 +195,13 @@ func (p *Proxy) getLazyConn(id string, addr string) (l *lazyConn) {
 // once.  Using these allows us to ensure that we only create one connection per
 // connection id, but to still support doing the Dial calls concurrently.
 type lazyConn struct {
-	p           *Proxy
-	id          string
-	addr        string
-	idleTimeout time.Duration
-	connOut     net.Conn
-	err         error
-	mutex       sync.Mutex
+	p               *Proxy
+	id              string
+	addr            string
+	timeToFirstRead time.Duration
+	connOut         net.Conn
+	err             error
+	mutex           sync.Mutex
 }
 
 func (p *Proxy) newLazyConn(id string, addr string) *lazyConn {
