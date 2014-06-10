@@ -32,7 +32,7 @@ if err == nil {
 To start the corresponding proxy server:
 
 ```go
-proxy := enproxy.NewProxy(0, 0)
+proxy := &enproxy.Proxy{}
 err := proxy.ListenAndServe(proxyAddress)
 if err != nil {
   log.Fatalf("Unable to listen and serve: %s", err)
