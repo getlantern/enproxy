@@ -17,7 +17,7 @@ const (
 var (
 	defaultPollInterval    = 50 * time.Millisecond
 	defaultIdleInterval    = 15 * time.Millisecond
-	defaultMaxIdleInterval = 500 * time.Millisecond
+	defaultMaxIdleInterval = 1000 * time.Millisecond
 	defaultIdleTimeout     = 70 * time.Second
 
 	emptyBuffer = []byte{}
