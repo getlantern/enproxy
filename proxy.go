@@ -146,9 +146,13 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 			// Always respond 200 OK
 			resp.WriteHeader(200)
 			first = false
-			lp.firstRead.record(latency)
-		} else {
-			lp.secondRead.record(latency)
+		}
+		if n > 0 {
+			if first {
+				lp.firstRead.record(latency)
+			} else {
+				lp.secondRead.record(latency)
+			}
 		}
 
 		// Write if necessary
