@@ -17,8 +17,43 @@ const (
 
 var (
 	defaultPollInterval = 50 * time.Millisecond
-	defaultIdleInterval = 35 * time.Millisecond
-	defaultIdleTimeout  = 5 * time.Second
+	defaultIdleTimeout  = 70 * time.Second
+
+	shortTimeout          = 35 * time.Millisecond
+	mediumTimeout         = 350 * time.Millisecond
+	longTimeout           = 1000 * time.Millisecond
+	largeFileCutoff       = 50000
+	reallyLargeFileCutoff = 250000
+
+	// defaultTimeoutProfile is optimized for low latency
+	defaultTimoutProfile = NewTimeoutProfile(shortTimeout)
+
+	// defaultReadTimeoutProfilesByPort
+	//
+	// Read timeout profiles are determined based on the following heuristic:
+	//
+	// HTTP - typically the latency to first response on an HTTP request will be
+	//        high because the server has to prepare/find and then return the
+	//        content.  Once the content starts streaming, reads should proceed
+	//        relatively quickly.  If we're reading a lot of data (say more than
+	//        50Kb, then we're possibly looking at a large file download, which
+	//        we want to make sure streams completely in one response, so we set
+	//        a bigger read timeout)
+	//
+	// HTTPS - the initial traffic is all handshaking, which needs to proceed
+	//         with as low latency as possible, so we use a short timeout.  If
+	//         we enter into a large file scenario, then we bump up the timeout
+	//         to provide more complete streaming responses.
+	//
+	defaultReadTimeoutProfilesByPort = map[string]*TimeoutProfile{
+		"80":  NewTimeoutProfile(longTimeout).WithTimeoutAfter(1, shortTimeout).WithTimeoutAfter(largeFileCutoff, mediumTimeout).WithTimeoutAfter(reallyLargeFileCutoff, longTimeout),
+		"443": NewTimeoutProfile(shortTimeout).WithTimeoutAfter(largeFileCutoff, mediumTimeout).WithTimeoutAfter(reallyLargeFileCutoff, longTimeout),
+	}
+
+	defaultWriteTimeoutProfilesByPort = map[string]*TimeoutProfile{
+		"80":  NewTimeoutProfile(shortTimeout).WithTimeoutAfter(largeFileCutoff, mediumTimeout).WithTimeoutAfter(reallyLargeFileCutoff, longTimeout),
+		"443": NewTimeoutProfile(shortTimeout).WithTimeoutAfter(largeFileCutoff, mediumTimeout).WithTimeoutAfter(reallyLargeFileCutoff, longTimeout),
+	}
 
 	emptyBuffer = []byte{}
 )
@@ -69,6 +104,7 @@ type Conn struct {
 	closeCh           chan interface{}    // close notification
 
 	/* Fields for tracking activity/closed status */
+	bytesWritten     int
 	lastActivityTime time.Time    // time of last read or write
 	closedMutex      sync.RWMutex // mutex controlling access to closed flag
 	closed           bool         // whether or not this Conn is closed
@@ -99,16 +135,21 @@ type Config struct {
 	// NewRequest: function to create a new request to the proxy
 	NewRequest newRequestFunc
 
-	// IdleInterval: how long to wait for the next write/read before switching
-	// to read/write (defaults to 15 milliseconds)
-	IdleInterval time.Duration
+	// DefaultTimeoutProfile: default profile determining write timeouts based on
+	// bytes read
+	DefaultTimeoutProfile *TimeoutProfile
+
+	// TimeoutProfilesByPort: profiles determining write timeouts based on bytes
+	// read, with a different profile by port
+	TimeoutProfilesByPort map[string]*TimeoutProfile
 
 	// PollInterval: how frequently to poll (i.e. create a new request/response)
 	// , defaults to 50 ms
 	PollInterval time.Duration
 
 	// IdleTimeout: how long to wait before closing an idle connection, defaults
-	// to 5 seconds
+	// to 70 seconds.  The high default value is selected to work well with XMPP
+	// traffic tunneled over enproxy by Lantern.
 	IdleTimeout time.Duration
 }
 

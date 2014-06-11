@@ -35,8 +35,18 @@ func (c *Conn) initDefaults() {
 	if c.Config.PollInterval == 0 {
 		c.Config.PollInterval = defaultPollInterval
 	}
-	if c.Config.IdleInterval == 0 {
-		c.Config.IdleInterval = defaultIdleInterval
+	if c.Config.DefaultTimeoutProfile == nil {
+		c.Config.DefaultTimeoutProfile = defaultTimoutProfile
+	}
+	if c.Config.TimeoutProfilesByPort == nil {
+		c.Config.TimeoutProfilesByPort = make(map[string]*TimeoutProfile)
+	}
+	for port, defaultProfile := range defaultWriteTimeoutProfilesByPort {
+		_, exists := c.Config.TimeoutProfilesByPort[port]
+		if !exists {
+			// Merge default into map
+			c.Config.TimeoutProfilesByPort[port] = defaultProfile
+		}
 	}
 	if c.Config.IdleTimeout == 0 {
 		c.Config.IdleTimeout = defaultIdleTimeout
@@ -111,7 +121,6 @@ func (c *Conn) postRequests() {
 		}
 
 		c.lastRequestTime = time.Now()
-
 		// Write request
 		err := req.Write(proxyConn)
 		if err != nil {
@@ -157,10 +166,18 @@ func (c *Conn) processReadsAndWrites() {
 		c.drainAndCloseChannels()
 	}()
 
+	port := strings.Split(c.Addr, ":")[1]
+	tp := c.Config.TimeoutProfilesByPort[port]
+	if tp == nil {
+		tp = c.Config.DefaultTimeoutProfile
+	}
+
 	for {
 		if c.isClosed() {
 			return
 		}
+
+		timeout := tp.GetTimeoutAfter(c.bytesWritten)
 		select {
 		case b := <-c.writeRequestsCh:
 			c.markActive()
@@ -169,7 +186,7 @@ func (c *Conn) processReadsAndWrites() {
 				// Problem writing, stop processing
 				return
 			}
-		case <-time.After(c.Config.IdleInterval):
+		case <-time.After(timeout):
 			if c.isIdle() {
 				// No activity for more than IdleTimeout, stop processing
 				return
@@ -204,6 +221,7 @@ func (c *Conn) processWrite(b []byte) (ok bool) {
 		c.writeResponsesCh <- rwResponse{n, fmt.Errorf("Unable to write to proxy pipe: %s", err)}
 		return false
 	}
+	c.bytesWritten += n
 
 	// Let the caller know how much we wrote
 	c.writeResponsesCh <- rwResponse{n, nil}

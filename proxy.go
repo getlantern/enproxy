@@ -16,39 +16,6 @@ const (
 	DEFAULT_BUFFER_SIZE = 8096
 )
 
-var (
-	shortTimeout          = defaultIdleInterval
-	mediumTimeout         = 350 * time.Millisecond
-	longTimeout           = 1000 * time.Millisecond
-	largeFileCutoff       = 50000
-	reallyLargeFileCutoff = 250000
-
-	// defaultTimeoutProfile is optimized for low latency
-	defaultTimoutProfile = NewTimeoutProfile(shortTimeout)
-
-	// defaultTimeoutProfilesByPort
-	//
-	// Timeout profiles are determined based on the following heuristic:
-	//
-	// HTTP - typically the latency to first response on an HTTP request will be
-	//        high because the server has to prepare/find and then return the
-	//        content.  Once the content starts streaming, reads should proceed
-	//        relatively quickly.  If we're reading a lot of data (say more than
-	//        50Kb, then we're possibly looking at a large file download, which
-	//        we want to make sure streams completely in one response, so we set
-	//        a bigger read timeout)
-	//
-	// HTTPS - the initial traffic is all handshaking, which needs to proceed
-	//         with as low latency as possible, so we use a short timeout.  If
-	//         we enter into a large file scenario, then we bump up the timeout
-	//         to provide more complete streaming responses.
-	//
-	defaultTimeoutProfilesByPort = map[string]*TimeoutProfile{
-		"80":  NewTimeoutProfile(longTimeout).WithTimeoutAfter(1, shortTimeout).WithTimeoutAfter(largeFileCutoff, mediumTimeout).WithTimeoutAfter(reallyLargeFileCutoff, longTimeout),
-		"443": NewTimeoutProfile(shortTimeout).WithTimeoutAfter(largeFileCutoff, mediumTimeout).WithTimeoutAfter(reallyLargeFileCutoff, longTimeout),
-	}
-)
-
 // Proxy is the server side to an enproxy.Client.  Proxy implements the
 // http.Handler interface for plugging into an HTTP server, and it also
 // provides a convenience ListenAndServe() function for quickly starting up
@@ -69,16 +36,6 @@ type Proxy struct {
 	// TimeoutProfilesByPort: profiles determining read timeouts based on bytes
 	// read, with a different profile by port
 	TimeoutProfilesByPort map[string]*TimeoutProfile
-
-	// IdleInterval: time to wait for next read before returning response.
-	// Defaults to 25ms.
-	// Applies to all traffic except port 80 (see IdleIntervalHTTP).
-	IdleInterval time.Duration
-
-	// IdleIntervalHTTP: like IdleInterval, but only for traffic on port 80.
-	// We use a larger IdleInterval for HTTP since it doesn't involve a chatty
-	// handshake at the beginning and is typically
-	IdleIntervalHTTP time.Duration
 
 	// IdleTimeout: how long to wait before closing an idle connection, defaults
 	// to 70 seconds
@@ -106,7 +63,7 @@ func (p *Proxy) Start() {
 	if p.TimeoutProfilesByPort == nil {
 		p.TimeoutProfilesByPort = make(map[string]*TimeoutProfile)
 	}
-	for port, defaultProfile := range defaultTimeoutProfilesByPort {
+	for port, defaultProfile := range defaultReadTimeoutProfilesByPort {
 		_, exists := p.TimeoutProfilesByPort[port]
 		if !exists {
 			// Merge default into map
