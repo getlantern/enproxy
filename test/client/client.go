@@ -16,8 +16,11 @@ func main() {
 		DialProxy: func(addr string) (net.Conn, error) {
 			return net.Dial("tcp", os.Args[2])
 		},
-		NewRequest: func(method string, body io.Reader) (req *http.Request, err error) {
-			return http.NewRequest(method, "http://"+os.Args[2]+"/", body)
+		NewRequest: func(host string, method string, body io.Reader) (req *http.Request, err error) {
+			if host == "" {
+				host = os.Args[2]
+			}
+			return http.NewRequest(method, "http://"+host+"/", body)
 		},
 	}
 	httpServer := &http.Server{

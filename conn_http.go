@@ -60,7 +60,6 @@ func pipeData(clientConn net.Conn, buffClientConn *bufio.ReadWriter, proxyConn *
 			return
 		}
 		io.Copy(proxyConn, buffClientConn)
-		proxyConn.Close()
 	}()
 
 	// Copy from proxy to client

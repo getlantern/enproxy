@@ -9,9 +9,10 @@ import (
 )
 
 const (
-	X_HTTPCONN_ID        = "X-HTTPConn-Id"
-	X_HTTPCONN_DEST_ADDR = "X-HTTPConn-Dest-Addr"
-	X_HTTPCONN_EOF       = "X-HTTPConn-EOF"
+	X_HTTPCONN_ID         = "X-HTTPConn-Id"
+	X_HTTPCONN_DEST_ADDR  = "X-HTTPConn-Dest-Addr"
+	X_HTTPCONN_EOF        = "X-HTTPConn-EOF"
+	X_HTTPCONN_PROXY_HOST = "X-HTTPConn-Proxy-Host"
 )
 
 var (
@@ -49,6 +50,12 @@ type Conn struct {
 	// Config: configuration of this Conn
 	Config *Config
 
+	// Self-reported FQDN of the proxy serving this connection.  This allows
+	// us to guarantee we reach the same server in subsequent requests, even
+	// if it was initially reached through a FQDN that may resolve to
+	// different IPs in different DNS lookups (e.g. as in DNS round robin).
+	proxyHost string
+
 	id string // unique identifier for this connection
 
 	/* Channels for processing reads, writes and closes */
@@ -76,7 +83,7 @@ type Conn struct {
 
 type dialFunc func(addr string) (net.Conn, error)
 
-type newRequestFunc func(method string, body io.Reader) (*http.Request, error)
+type newRequestFunc func(host string, method string, body io.Reader) (*http.Request, error)
 
 // rwResponse is a response to a read or write
 type rwResponse struct {
@@ -101,7 +108,7 @@ type Config struct {
 	PollInterval time.Duration
 
 	// IdleTimeout: how long to wait before closing an idle connection, defaults
-	// to 70 seconds
+	// to 5 seconds
 	IdleTimeout time.Duration
 }
 
