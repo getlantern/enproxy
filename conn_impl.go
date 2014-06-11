@@ -111,7 +111,6 @@ func (c *Conn) postRequests() {
 		}
 
 		c.lastRequestTime = time.Now()
-		log.Printf("Making request to: %s", c.Addr)
 
 		// Write request
 		err := req.Write(proxyConn)

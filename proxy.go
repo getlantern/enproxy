@@ -108,7 +108,7 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	}
 
 	// Write response
-	b := make([]byte, 5)
+	b := make([]byte, p.BufferSize)
 	first := true
 	var timeOfFirstRead time.Time
 	var timeOfLastRead time.Time
