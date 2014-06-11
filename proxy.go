@@ -112,9 +112,7 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	b := make([]byte, p.BufferSize)
 	first := true
 	for {
-		var timeout time.Duration
-		// On first read, wait a long time
-		timeout = 25 * time.Millisecond
+		timeout := 25 * time.Millisecond
 		if port == "80" {
 			timeout = 250 * time.Millisecond
 		}
