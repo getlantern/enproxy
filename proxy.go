@@ -17,10 +17,11 @@ const (
 )
 
 var (
-	shortTimeout    = 25 * time.Millisecond
-	mediumTimeout   = 250 * time.Millisecond
-	longTimeout     = 1000 * time.Millisecond
-	largeFileCutoff = 50000
+	shortTimeout          = 25 * time.Millisecond
+	mediumTimeout         = 250 * time.Millisecond
+	longTimeout           = 1000 * time.Millisecond
+	largeFileCutoff       = 50000
+	reallyLargeFileCutoff = 250000
 
 	// defaultTimeoutProfile is optimized for low latency
 	defaultTimoutProfile = NewTimeoutProfile(shortTimeout)
@@ -43,8 +44,8 @@ var (
 	//         to provide more complete streaming responses.
 	//
 	defaultTimeoutProfilesByPort = map[string]*TimeoutProfile{
-		"80":  NewTimeoutProfile(longTimeout).WithTimeoutAfter(1, shortTimeout).WithTimeoutAfter(largeFileCutoff, mediumTimeout),
-		"443": NewTimeoutProfile(shortTimeout).WithTimeoutAfter(largeFileCutoff, mediumTimeout),
+		"80":  NewTimeoutProfile(longTimeout).WithTimeoutAfter(1, shortTimeout).WithTimeoutAfter(largeFileCutoff, mediumTimeout).WithTimeoutAfter(reallyLargeFileCutoff, longTimeout)
+		"443": NewTimeoutProfile(shortTimeout).WithTimeoutAfter(largeFileCutoff, mediumTimeout).WithTimeoutAfter(reallyLargeFileCutoff, longTimeout),
 	}
 )
 
