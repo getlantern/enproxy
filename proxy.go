@@ -17,19 +17,23 @@ const (
 )
 
 var (
-	shortTimeout         = 25 * time.Millisecond
-	mediumTimeout        = 250 * time.Millisecond
-	longTimeout          = 1000 * time.Millisecond
-	largeFileCutoff      = 25000
+	shortTimeout    = 25 * time.Millisecond
+	mediumTimeout   = 250 * time.Millisecond
+	longTimeout     = 1000 * time.Millisecond
+	largeFileCutoff = 50000
+
+	// defaultTimeoutProfile is optimized for low latency
 	defaultTimoutProfile = NewTimeoutProfile(shortTimeout)
 
+	// defaultTimeoutProfilesByPort
+	//
 	// Timeout profiles are determined based on the following heuristic:
 	//
 	// HTTP - typically the latency to first response on an HTTP request will be
 	//        high because the server has to prepare/find and then return the
 	//        content.  Once the content starts streaming, reads should proceed
 	//        relatively quickly.  If we're reading a lot of data (say more than
-	//        25K, then we're possibly looking at a large file download, which
+	//        50Kb, then we're possibly looking at a large file download, which
 	//        we want to make sure streams completely in one response, so we set
 	//        a bigger read timeout)
 	//
