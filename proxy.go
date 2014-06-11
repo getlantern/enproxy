@@ -143,14 +143,10 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 			// Always respond 200 OK
 			resp.WriteHeader(200)
 			first = false
-		}
-		if n > 0 {
-			if first {
-				timeOfFirstRead = time.Now()
-			} else {
-				timeOfLastRead = time.Now()
-				hasReadAtLeastTwice = true
-			}
+			timeOfFirstRead = time.Now()
+		} else {
+			timeOfLastRead = time.Now()
+			hasReadAtLeastTwice = true
 		}
 
 		// Write if necessary
