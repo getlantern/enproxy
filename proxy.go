@@ -124,6 +124,7 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 				// recent reads
 				timeBetweenFirstAndLastReads := timeOfLastRead.Sub(timeOfFirstRead)
 				if timeBetweenFirstAndLastReads > timeout {
+					log.Printf("Time between first and last reads: %s", timeBetweenFirstAndLastReads)
 					timeout = timeBetweenFirstAndLastReads
 				}
 			}
