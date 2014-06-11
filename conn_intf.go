@@ -51,9 +51,10 @@ type Conn struct {
 	// Config: configuration of this Conn
 	Config *Config
 
-	// FQDN of the proxy serving this connection.  This may be different from
-	// XXX if that is a hostname that may be resolved to a different IP in
-	// different requests (e.g. as with DNS round robin)
+	// Self-reported FQDN of the proxy serving this connection.  This allows
+	// us to guarantee we reach the same server in subsequent requests, even
+	// if it was initially reached through a FQDN that may resolve to
+	// different IPs in different DNS lookups (e.g. as in DNS round robin).
 	proxyHost string
 
 	id string // unique identifier for this connection
