@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -13,6 +14,12 @@ import (
 const (
 	BAD_GATEWAY         = 502
 	DEFAULT_BUFFER_SIZE = 8096
+)
+
+var (
+	defaultFirstReadTimeout     = defaultIdleInterval
+	defaultFirstReadTimeoutHTTP = 250 * time.Millisecond
+	defaultMaxReadTimeout       = 250 * time.Millisecond
 )
 
 // Proxy is the server side to an enproxy.Client.  Proxy implements the
@@ -28,10 +35,8 @@ type Proxy struct {
 	// if this server was originally reached by e.g. DNS round robin.
 	Host string
 
-	// MaxIdleInterval: maximum amount of time to wait for the next read before
-	// returning a response (defaults to 100ms).  The actual idleInterval will
-	// lower if enproxy detects a lower latency to the upstream server.
-	MaxIdleInterval time.Duration
+	// IdleInterval: time to wait for next read before returning response
+	IdleInterval time.Duration
 
 	// IdleTimeout: how long to wait before closing an idle connection, defaults
 	// to 5 seconds
@@ -53,8 +58,8 @@ func (p *Proxy) Start() {
 			return net.Dial("tcp", addr)
 		}
 	}
-	if p.MaxIdleInterval == 0 {
-		p.MaxIdleInterval = defaultMaxIdleInterval
+	if p.IdleInterval == 0 {
+		p.IdleInterval = defaultIdleInterval
 	}
 	if p.IdleTimeout == 0 {
 		p.IdleTimeout = defaultIdleTimeout
@@ -91,9 +96,9 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 		badGateway(resp, fmt.Sprintf("No address found in header %s", X_HTTPCONN_DEST_ADDR))
 		return
 	}
+	port := strings.Split(addr, ":")[1]
 
-	lc := p.getLazyConn(id, addr)
-	connOut, err := lc.get()
+	connOut, err := p.getLazyConn(id, addr).get()
 	if err != nil {
 		badGateway(resp, fmt.Sprintf("Unable to get connOut: %s", err))
 		return
@@ -110,31 +115,17 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	// Write response
 	b := make([]byte, p.BufferSize)
 	first := true
-	start := time.Now()
 	for {
-		// Figure out our read deadline as the min of p.MaxIdleInterval or
-		// twice the time to first read (if known).  lc.timeToFirstRead provides
-		// an approximation for latency, which allows us to make the
-		// idleInterval sensitive to the particular host being accessed.
-		idleInterval := p.MaxIdleInterval
-		if !first {
-			alternateIdleInterval := lc.timeToFirstRead * 2
-			if alternateIdleInterval < idleInterval {
-				idleInterval = alternateIdleInterval
-			}
+		timeout := 25 * time.Millisecond
+		if port == "80" {
+			timeout = 250 * time.Millisecond
 		}
-		readDeadline := time.Now().Add(idleInterval)
+		readDeadline := time.Now().Add(timeout)
 		connOut.SetReadDeadline(readDeadline)
 
 		// Read
 		n, readErr := connOut.Read(b)
 		if first {
-			if lc.timeToFirstRead == 0 {
-				// Remember how long it took to do our first read to use that
-				// to drive our idleInterval
-				lc.timeToFirstRead = time.Now().Sub(start)
-				log.Printf("Time to first read for %s was: %s", addr, lc.timeToFirstRead)
-			}
 			if readErr == io.EOF {
 				// Reached EOF
 				resp.Header().Set(X_HTTPCONN_EOF, "true")
@@ -183,57 +174,10 @@ func (p *Proxy) getLazyConn(id string, addr string) (l *lazyConn) {
 	defer p.connMapMutex.Unlock()
 	l = p.connMap[id]
 	if l == nil {
-		// Get destination address and build lazy conn
-
 		l = p.newLazyConn(id, addr)
 		p.connMap[id] = l
 	}
 	return
-}
-
-// lazyConn is a lazily initializing conn that makes sure it is only initialized
-// once.  Using these allows us to ensure that we only create one connection per
-// connection id, but to still support doing the Dial calls concurrently.
-type lazyConn struct {
-	p               *Proxy
-	id              string
-	addr            string
-	timeToFirstRead time.Duration
-	connOut         net.Conn
-	err             error
-	mutex           sync.Mutex
-}
-
-func (p *Proxy) newLazyConn(id string, addr string) *lazyConn {
-	return &lazyConn{
-		p:    p,
-		id:   id,
-		addr: addr,
-	}
-}
-
-func (l *lazyConn) get() (conn net.Conn, err error) {
-	l.mutex.Lock()
-	defer l.mutex.Unlock()
-	if l.err != nil {
-		// If dial already resulted in an error, return that
-		return nil, err
-	}
-	if l.connOut == nil {
-		// Lazily dial out
-		conn, err := l.p.Dial(l.addr)
-		if err != nil {
-			l.err = fmt.Errorf("Unable to dial out to %s: %s", l.addr, err)
-			return nil, l.err
-		}
-
-		// Wrap the connection in an idle timing one
-		l.connOut = withIdleTimeout(conn, l.p.IdleTimeout, func() {
-			delete(l.p.connMap, l.id)
-		})
-	}
-
-	return l.connOut, l.err
 }
 
 func badGateway(resp http.ResponseWriter, msg string) {
@@ -241,100 +185,4 @@ func badGateway(resp http.ResponseWriter, msg string) {
 	resp.Header().Set("Connection", "close")
 	resp.WriteHeader(BAD_GATEWAY)
 	fmt.Fprintf(resp, "No id found in header %s", X_HTTPCONN_ID)
-}
-
-// idleTimingConn is a net.Conn that wraps another net.Conn and that times out
-// if idle for more than idleTimeout.
-type idleTimingConn struct {
-	conn             net.Conn
-	idleTimeout      time.Duration
-	lastActivityTime time.Time
-	closedCh         chan bool
-}
-
-// withIdleTimeout creates a new idleTimingConn wrapping the given net.Conn.
-//
-// idleTimeout specifies how long to wait for inactivity before considering
-// connection idle.
-//
-// onClose is an optional function to call after the connection has been closed
-func withIdleTimeout(conn net.Conn, idleTimeout time.Duration, onClose func()) *idleTimingConn {
-	c := &idleTimingConn{
-		conn:             conn,
-		idleTimeout:      idleTimeout,
-		lastActivityTime: time.Now(),
-		closedCh:         make(chan bool, 10),
-	}
-
-	go func() {
-		if onClose != nil {
-			defer onClose()
-		}
-
-		for {
-			select {
-			case <-time.After(idleTimeout):
-				if c.closeIfNecessary() {
-					return
-				}
-			case <-c.closedCh:
-				return
-			}
-		}
-	}()
-
-	return c
-}
-
-func (c *idleTimingConn) Read(b []byte) (int, error) {
-	n, err := c.conn.Read(b)
-	if n > 0 {
-		c.markActive()
-	}
-	return n, err
-}
-
-func (c *idleTimingConn) Write(b []byte) (int, error) {
-	n, err := c.conn.Write(b)
-	if n > 0 {
-		c.markActive()
-	}
-	return n, err
-}
-
-func (c *idleTimingConn) Close() error {
-	c.closedCh <- true
-	return c.conn.Close()
-}
-
-func (c *idleTimingConn) LocalAddr() net.Addr {
-	return c.conn.LocalAddr()
-}
-
-func (c *idleTimingConn) RemoteAddr() net.Addr {
-	return c.conn.RemoteAddr()
-}
-
-func (c *idleTimingConn) SetDeadline(t time.Time) error {
-	return c.conn.SetDeadline(t)
-}
-
-func (c *idleTimingConn) SetReadDeadline(t time.Time) error {
-	return c.conn.SetReadDeadline(t)
-}
-
-func (c *idleTimingConn) SetWriteDeadline(t time.Time) error {
-	return c.conn.SetWriteDeadline(t)
-}
-
-func (c *idleTimingConn) markActive() {
-	c.lastActivityTime = time.Now()
-}
-
-func (c *idleTimingConn) closeIfNecessary() bool {
-	if time.Now().Sub(c.lastActivityTime) > c.idleTimeout {
-		c.Close()
-		return true
-	}
-	return false
 }

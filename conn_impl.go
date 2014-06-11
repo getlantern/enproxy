@@ -92,7 +92,8 @@ func (c *Conn) drainAndCloseChannels() {
 // In-order delivery is required because we are encapsulating a stream of data
 // inside the bodies of successive requests.
 func (c *Conn) postRequests() {
-	// Dial proxy
+	// Dial proxy (we do this inside here so that it's on a goroutine and
+	// doesn't block the call to Conn.Start().
 	proxyConn, err := c.Config.DialProxy(c.Addr)
 	if err != nil {
 		log.Printf("Unable to dial proxy: %s", err)
