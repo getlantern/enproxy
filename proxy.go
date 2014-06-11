@@ -18,7 +18,7 @@ const (
 
 var (
 	defaultFirstReadTimeout     = defaultIdleInterval
-	defaultFirstReadTimeoutHTTP = 10000 * time.Second
+	defaultFirstReadTimeoutHTTP = 250 * time.Millisecond
 	defaultMaxReadTimeout       = 250 * time.Millisecond
 )
 
