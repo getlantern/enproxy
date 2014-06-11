@@ -19,6 +19,7 @@ const (
 var (
 	defaultFirstReadTimeout     = defaultIdleInterval
 	defaultFirstReadTimeoutHTTP = 10000 * time.Second
+	defaultMaxReadTimeout       = 250 * time.Millisecond
 )
 
 // Proxy is the server side to an enproxy.Client.  Proxy implements the
@@ -131,6 +132,10 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 				timeBetweenFirstAndLastReads := timeOfLastRead.Sub(timeOfFirstRead)
 				if timeBetweenFirstAndLastReads > timeout {
 					timeout = timeBetweenFirstAndLastReads
+				}
+				if timeout > defaultMaxReadTimeout {
+					// Never exceed the max read timeout
+					timeout = defaultMaxReadTimeout
 				}
 			}
 		}
