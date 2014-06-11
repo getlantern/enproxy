@@ -129,14 +129,12 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 				// amount of time that's elapsed between the first and most
 				// recent reads
 				timeBetweenFirstAndLastReads := timeOfLastRead.Sub(timeOfFirstRead)
-				log.Printf("Time between first and last reads: %s", timeBetweenFirstAndLastReads)
 				if timeBetweenFirstAndLastReads > timeout {
 					timeout = timeBetweenFirstAndLastReads
 				}
 			}
 		}
 		readDeadline := time.Now().Add(timeout)
-		log.Printf("Timeout for %s is %s", addr, timeout)
 		connOut.SetReadDeadline(readDeadline)
 
 		// Read
