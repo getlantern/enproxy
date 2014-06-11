@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -16,7 +17,8 @@ const (
 )
 
 var (
-	defaultFirstReadTimeout = 10000 * time.Second
+	defaultFirstReadTimeout     = defaultIdleInterval
+	defaultFirstReadTimeoutHTTP = 10000 * time.Second
 )
 
 // Proxy is the server side to an enproxy.Client.  Proxy implements the
@@ -89,6 +91,7 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 		badGateway(resp, fmt.Sprintf("No address found in header %s", X_HTTPCONN_DEST_ADDR))
 		return
 	}
+	port := strings.Split(addr, ":")[1]
 
 	connOut, err := p.getLazyConn(id, addr).get()
 	if err != nil {
@@ -105,7 +108,7 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	}
 
 	// Write response
-	b := make([]byte, p.BufferSize)
+	b := make([]byte, 5)
 	first := true
 	var timeOfFirstRead time.Time
 	var timeOfLastRead time.Time
@@ -115,6 +118,9 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 		if first {
 			// On first read, wait a long time
 			timeout = defaultFirstReadTimeout
+			if port == "80" {
+				timeout = defaultFirstReadTimeoutHTTP
+			}
 		} else {
 			// On subsequent reads, use the IdleInterval by default
 			timeout = p.IdleInterval
@@ -123,8 +129,8 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 				// amount of time that's elapsed between the first and most
 				// recent reads
 				timeBetweenFirstAndLastReads := timeOfLastRead.Sub(timeOfFirstRead)
+				log.Printf("Time between first and last reads: %s", timeBetweenFirstAndLastReads)
 				if timeBetweenFirstAndLastReads > timeout {
-					log.Printf("Time between first and last reads: %s", timeBetweenFirstAndLastReads)
 					timeout = timeBetweenFirstAndLastReads
 				}
 			}
