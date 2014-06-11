@@ -111,33 +111,12 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	// Write response
 	b := make([]byte, p.BufferSize)
 	first := true
-	var timeOfFirstRead time.Time
-	var timeOfLastRead time.Time
-	hasReadAtLeastTwice := false
 	for {
 		var timeout time.Duration
-		if first {
-			// On first read, wait a long time
-			timeout = defaultFirstReadTimeout
-			if port == "80" {
-				timeout = defaultFirstReadTimeoutHTTP
-			}
-		} else {
-			// On subsequent reads, use the IdleInterval by default
-			timeout = p.IdleInterval
-			if hasReadAtLeastTwice {
-				// If we've had 2 or more reads, set the timeout to equal the
-				// amount of time that's elapsed between the first and most
-				// recent reads
-				timeBetweenFirstAndLastReads := timeOfLastRead.Sub(timeOfFirstRead)
-				if timeBetweenFirstAndLastReads > timeout {
-					timeout = timeBetweenFirstAndLastReads
-				}
-				if timeout > defaultMaxReadTimeout {
-					// Never exceed the max read timeout
-					timeout = defaultMaxReadTimeout
-				}
-			}
+		// On first read, wait a long time
+		timeout = 25 * time.Millisecond
+		if port == "80" {
+			timeout = 250 * time.Millisecond
 		}
 		readDeadline := time.Now().Add(timeout)
 		connOut.SetReadDeadline(readDeadline)
@@ -152,10 +131,6 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 			// Always respond 200 OK
 			resp.WriteHeader(200)
 			first = false
-			timeOfFirstRead = time.Now()
-		} else {
-			timeOfLastRead = time.Now()
-			hasReadAtLeastTwice = true
 		}
 
 		// Write if necessary
