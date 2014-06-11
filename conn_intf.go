@@ -108,7 +108,7 @@ type Config struct {
 	PollInterval time.Duration
 
 	// IdleTimeout: how long to wait before closing an idle connection, defaults
-	// to 5 seconds
+	// to 70 seconds
 	IdleTimeout time.Duration
 }
 

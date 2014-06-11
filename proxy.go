@@ -17,9 +17,31 @@ const (
 )
 
 var (
-	defaultFirstReadTimeout     = defaultIdleInterval
-	defaultFirstReadTimeoutHTTP = 250 * time.Millisecond
-	defaultMaxReadTimeout       = 250 * time.Millisecond
+	shortTimeout         = 25 * time.Millisecond
+	mediumTimeout        = 250 * time.Millisecond
+	longTimeout          = 1000 * time.Millisecond
+	largeFileCutoff      = 25000
+	defaultTimoutProfile = NewTimeoutProfile(shortTimeout)
+
+	// Timeout profiles are determined based on the following heuristic:
+	//
+	// HTTP - typically the latency to first response on an HTTP request will be
+	//        high because the server has to prepare/find and then return the
+	//        content.  Once the content starts streaming, reads should proceed
+	//        relatively quickly.  If we're reading a lot of data (say more than
+	//        25K, then we're possibly looking at a large file download, which
+	//        we want to make sure streams completely in one response, so we set
+	//        a bigger read timeout)
+	//
+	// HTTPS - the initial traffic is all handshaking, which needs to proceed
+	//         with as low latency as possible, so we use a short timeout.  If
+	//         we enter into a large file scenario, then we bump up the timeout
+	//         to provide more complete streaming responses.
+	//
+	defaultTimeoutProfilesByPort = map[string]*TimeoutProfile{
+		"80":  NewTimeoutProfile(longTimeout).WithTimeoutAfter(1, shortTimeout).WithTimeoutAfter(largeFileCutoff, mediumTimeout),
+		"443": NewTimeoutProfile(shortTimeout).WithTimeoutAfter(largeFileCutoff, mediumTimeout),
+	}
 )
 
 // Proxy is the server side to an enproxy.Client.  Proxy implements the
@@ -35,14 +57,29 @@ type Proxy struct {
 	// if this server was originally reached by e.g. DNS round robin.
 	Host string
 
-	// IdleInterval: time to wait for next read before returning response
+	// DefaultTimeoutProfile: default profile determining read timeouts based on
+	// bytes read
+	DefaultTimeoutProfile *TimeoutProfile
+
+	// TimeoutProfilesByPort: profiles determining read timeouts based on bytes
+	// read, with a different profile by port
+	TimeoutProfilesByPort map[string]*TimeoutProfile
+
+	// IdleInterval: time to wait for next read before returning response.
+	// Defaults to 25ms.
+	// Applies to all traffic except port 80 (see IdleIntervalHTTP).
 	IdleInterval time.Duration
 
+	// IdleIntervalHTTP: like IdleInterval, but only for traffic on port 80.
+	// We use a larger IdleInterval for HTTP since it doesn't involve a chatty
+	// handshake at the beginning and is typically
+	IdleIntervalHTTP time.Duration
+
 	// IdleTimeout: how long to wait before closing an idle connection, defaults
-	// to 5 seconds
+	// to 70 seconds
 	IdleTimeout time.Duration
 
-	// BufferSize: controls the size of hte buffers used for copying data from
+	// BufferSize: controls the size of the buffers used for copying data from
 	// outbound to inbound connections.  If given as 0, defaults to 8096 bytes.
 	BufferSize int
 
@@ -58,8 +95,18 @@ func (p *Proxy) Start() {
 			return net.Dial("tcp", addr)
 		}
 	}
-	if p.IdleInterval == 0 {
-		p.IdleInterval = defaultIdleInterval
+	if p.DefaultTimeoutProfile == nil {
+		p.DefaultTimeoutProfile = defaultTimoutProfile
+	}
+	if p.TimeoutProfilesByPort == nil {
+		p.TimeoutProfilesByPort = make(map[string]*TimeoutProfile)
+	}
+	for port, defaultProfile := range defaultTimeoutProfilesByPort {
+		_, exists := p.TimeoutProfilesByPort[port]
+		if !exists {
+			// Merge default into map
+			p.TimeoutProfilesByPort[port] = defaultProfile
+		}
 	}
 	if p.IdleTimeout == 0 {
 		p.IdleTimeout = defaultIdleTimeout
@@ -96,9 +143,9 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 		badGateway(resp, fmt.Sprintf("No address found in header %s", X_HTTPCONN_DEST_ADDR))
 		return
 	}
-	port := strings.Split(addr, ":")[1]
 
-	connOut, err := p.getLazyConn(id, addr).get()
+	lc := p.getLazyConn(id, addr)
+	connOut, err := lc.get()
 	if err != nil {
 		badGateway(resp, fmt.Sprintf("Unable to get connOut: %s", err))
 		return
@@ -112,14 +159,18 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// Get timeout profile based on addr
+	port := strings.Split(addr, ":")[1]
+	tp := p.TimeoutProfilesByPort[port]
+	if tp == nil {
+		tp = p.DefaultTimeoutProfile
+	}
+
 	// Write response
 	b := make([]byte, p.BufferSize)
 	first := true
 	for {
-		timeout := 25 * time.Millisecond
-		if port == "80" {
-			timeout = 250 * time.Millisecond
-		}
+		timeout := tp.GetTimeoutAfter(lc.bytesRead)
 		readDeadline := time.Now().Add(timeout)
 		connOut.SetReadDeadline(readDeadline)
 
@@ -148,6 +199,7 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 				connOut.Close()
 				return
 			}
+			lc.bytesRead += n
 		}
 
 		// Inspect readErr to decide whether or not to continue reading
