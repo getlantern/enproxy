@@ -17,8 +17,8 @@ const (
 
 var (
 	defaultPollInterval = 50 * time.Millisecond
-	defaultIdleInterval = 15 * time.Millisecond
-	defaultIdleTimeout  = 70 * time.Second
+	defaultIdleInterval = 35 * time.Millisecond
+	defaultIdleTimeout  = 5 * time.Second
 
 	emptyBuffer = []byte{}
 )
@@ -108,7 +108,7 @@ type Config struct {
 	PollInterval time.Duration
 
 	// IdleTimeout: how long to wait before closing an idle connection, defaults
-	// to 70 seconds
+	// to 5 seconds
 	IdleTimeout time.Duration
 }
 

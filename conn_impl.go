@@ -223,11 +223,9 @@ func (c *Conn) initRequestToProxy() error {
 // our encapsulated HTTP request, or we've hit our idle interval and still
 // haven't received a read request.
 func (c *Conn) processReads() (ok bool) {
-	haveReceivedReadRequest := false
 	for {
 		select {
 		case b := <-c.readRequestsCh:
-			haveReceivedReadRequest = true
 			n, err, responseFinished := c.processRead(b)
 			if n > 0 {
 				c.markActive()
@@ -243,13 +241,6 @@ func (c *Conn) processReads() (ok bool) {
 					c.resp.Body.Close()
 					c.resp = nil
 				}
-				return true
-			}
-		case <-time.After(c.Config.IdleInterval):
-			if !haveReceivedReadRequest {
-				// If we went IdleInterval time since switching to processReads
-				// and still haven't received a read request, stop trying to
-				// read.
 				return true
 			}
 		case <-c.closeCh:

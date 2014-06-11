@@ -17,8 +17,8 @@ const (
 )
 
 var (
-	shortTimeout          = 25 * time.Millisecond
-	mediumTimeout         = 250 * time.Millisecond
+	shortTimeout          = defaultIdleInterval
+	mediumTimeout         = 350 * time.Millisecond
 	longTimeout           = 1000 * time.Millisecond
 	largeFileCutoff       = 50000
 	reallyLargeFileCutoff = 250000
@@ -201,6 +201,7 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 		if n > 0 {
 			_, writeErr := resp.Write(b[:n])
 			if writeErr != nil {
+				log.Printf("Write error: %s", err)
 				connOut.Close()
 				return
 			}
@@ -217,6 +218,7 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 					return
 				}
 			default:
+				log.Printf("Unexpected read error: %s", readErr)
 				// Unexpected error, close outbound connection
 				connOut.Close()
 				return

@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	INFINITY = math.MaxInt64
+	INFINITY = math.MaxInt32
 )
 
 type TimeoutProfile struct {
