@@ -62,9 +62,6 @@ func (c *Conn) makeChannels() {
 	c.readRequestsCh = make(chan []byte)
 	c.readResponsesCh = make(chan rwResponse)
 	c.nextRequestCh = make(chan *http.Request)
-	c.nextResponseCh = make(chan *http.Response)
-	c.nextResponseErrCh = make(chan error)
-	c.closeCh = make(chan interface{})
 }
 
 // drainAndCloseChannels drains all inbound channels and then closes them, which
@@ -79,19 +76,10 @@ func (c *Conn) drainAndCloseChannels() {
 			c.readResponsesCh <- rwResponse{0, io.EOF}
 		case <-c.nextRequestCh:
 			// ignore
-		case resp := <-c.nextResponseCh:
-			resp.Body.Close()
-		case <-c.nextResponseErrCh:
-			// ignore
-		case <-c.closeCh:
-			// ignore
 		default:
 			close(c.writeRequestsCh)
 			close(c.readRequestsCh)
 			close(c.nextRequestCh)
-			close(c.nextResponseCh)
-			close(c.nextResponseErrCh)
-			close(c.closeCh)
 			return
 		}
 	}
@@ -122,18 +110,17 @@ func (c *Conn) postRequests() {
 			return
 		}
 
-		c.lastRequestTime = time.Now()
 		// Write request
 		err := req.Write(proxyConn)
 		if err != nil {
-			c.nextResponseErrCh <- err
+			log.Printf("Unexpected error writing write request: %s", err)
 			return
 		}
 
 		// Read corresponding response
 		resp, err := http.ReadResponse(bufReader, nil)
 		if err != nil {
-			c.nextResponseErrCh <- fmt.Errorf("Unable to read write response from proxy: %s", err)
+			log.Printf("Unexpected error reading write response: %s", err)
 			return
 		}
 
@@ -142,7 +129,7 @@ func (c *Conn) postRequests() {
 		if !responseOK {
 			respText := bytes.NewBuffer(nil)
 			resp.Write(respText)
-			c.nextResponseErrCh <- fmt.Errorf("Bad response status for write: %d\n%s\n", resp.StatusCode, string(respText.Bytes()))
+			log.Printf("Bad response status for write: %d\n%s\n", resp.StatusCode, string(respText.Bytes()))
 			return
 		}
 
@@ -218,7 +205,6 @@ func (c *Conn) processWrite(b []byte) (ok bool) {
 		return false
 	}
 	log.Printf("processWrite() - wrote %d bytes", n)
-	c.bytesWritten += n
 
 	// Let the caller know how much we wrote
 	c.writeResponsesCh <- rwResponse{n, nil}

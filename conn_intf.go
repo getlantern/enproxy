@@ -94,27 +94,22 @@ type Conn struct {
 	id string // unique identifier for this connection
 
 	/* Channels for processing reads, writes and closes */
-	writeRequestsCh   chan []byte         // requests to write
-	writeResponsesCh  chan rwResponse     // responses for writes
-	readRequestsCh    chan []byte         // requests to read
-	readResponsesCh   chan rwResponse     // responses for reads
-	nextRequestCh     chan *http.Request  // channel for next outgoing request
-	nextResponseCh    chan *http.Response // channel for next response
-	nextResponseErrCh chan error          // channel for error on next response
-	closeCh           chan interface{}    // close notification
+	writeRequestsCh  chan []byte        // requests to write
+	writeResponsesCh chan rwResponse    // responses for writes
+	readRequestsCh   chan []byte        // requests to read
+	readResponsesCh  chan rwResponse    // responses for reads
+	nextRequestCh    chan *http.Request // channel for next outgoing request
 
 	/* Fields for tracking activity/closed status */
-	bytesWritten      int
 	lastActivityTime  time.Time    // time of last read or write
 	lastActivityMutex sync.RWMutex // mutex controlling access to lastActivityTime
 	closed            bool         // whether or not this Conn is closed
 	closedMutex       sync.RWMutex // mutex controlling access to closed flag
 
 	/* Fields for tracking current request and response */
-	reqBody         *io.PipeReader // pipe reader for current request body
-	reqBodyWriter   *io.PipeWriter // pipe writer to current request body
-	resp            *http.Response // the current response being used to read data
-	lastRequestTime time.Time      // time of last request
+	reqBody       *io.PipeReader // pipe reader for current request body
+	reqBodyWriter *io.PipeWriter // pipe writer to current request body
+	resp          *http.Response // the current response being used to read data
 }
 
 type dialFunc func(addr string) (net.Conn, error)
@@ -193,9 +188,7 @@ func (c *Conn) Read(b []byte) (n int, err error) {
 
 // Close() implements the function from net.Conn
 func (c *Conn) Close() error {
-	if c.markClosed() {
-		c.closeCh <- true
-	}
+	c.markClosed()
 	return nil
 }
 
