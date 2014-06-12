@@ -104,13 +104,13 @@ type Conn struct {
 	closeCh           chan interface{}    // close notification
 
 	/* Fields for tracking activity/closed status */
-	bytesWritten     int
-	lastActivityTime time.Time    // time of last read or write
-	closedMutex      sync.RWMutex // mutex controlling access to closed flag
-	closed           bool         // whether or not this Conn is closed
+	bytesWritten      int
+	lastActivityTime  time.Time    // time of last read or write
+	lastActivityMutex sync.RWMutex // mutex controlling access to lastActivityTime
+	closed            bool         // whether or not this Conn is closed
+	closedMutex       sync.RWMutex // mutex controlling access to closed flag
 
 	/* Fields for tracking current request and response */
-	req             *http.Request  // the current request being used to send data
 	reqBody         *io.PipeReader // pipe reader for current request body
 	reqBodyWriter   *io.PipeWriter // pipe writer to current request body
 	resp            *http.Response // the current response being used to read data

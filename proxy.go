@@ -6,7 +6,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 )
@@ -113,75 +112,45 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	if req.Method == "POST" {
+		p.handlePOST(resp, req, connOut)
+	} else if req.Method == "GET" {
+		p.handleGET(resp, req, connOut)
+	} else {
+		badGateway(resp, fmt.Sprintf("Method %s not supported", req.Method))
+	}
+}
+
+// handlePOST forwards the data from a POST to the outbound connection
+func (p *Proxy) handlePOST(resp http.ResponseWriter, req *http.Request, connOut net.Conn) {
 	// Pipe request
-	_, err = io.Copy(connOut, req.Body)
+	_, err := io.Copy(connOut, req.Body)
 	if err != nil {
 		badGateway(resp, fmt.Sprintf("Unable to write to connOut: %s", err))
 		connOut.Close()
 		return
 	}
+	resp.WriteHeader(200)
+}
 
-	// Get timeout profile based on addr
-	port := strings.Split(addr, ":")[1]
-	tp := p.TimeoutProfilesByPort[port]
-	if tp == nil {
-		tp = p.DefaultTimeoutProfile
-	}
-
-	// Write response
-	b := make([]byte, p.BufferSize)
-	first := true
-	for {
-		timeout := tp.GetTimeoutAfter(lc.bytesRead)
-		readDeadline := time.Now().Add(timeout)
-		connOut.SetReadDeadline(readDeadline)
-
-		// Read
-		n, readErr := connOut.Read(b)
-		if first {
-			if readErr == io.EOF {
-				// Reached EOF
-				resp.Header().Set(X_HTTPCONN_EOF, "true")
-			}
-			if p.Host != "" {
-				// Always feed this so clients will be guaranteed to reach
-				// this particular proxy even if they originally reached us
-				// through (e.g.) DNS round robin.
-				resp.Header().Set(X_HTTPCONN_PROXY_HOST, p.Host)
-			}
-			// Always respond 200 OK
-			resp.WriteHeader(200)
-			first = false
-		}
-
-		// Write if necessary
-		if n > 0 {
-			_, writeErr := resp.Write(b[:n])
-			if writeErr != nil {
-				log.Printf("Write error: %s", err)
-				connOut.Close()
-				return
-			}
-			lc.bytesRead += n
-		}
-
-		// Inspect readErr to decide whether or not to continue reading
-		if readErr != nil {
-			switch e := readErr.(type) {
-			case net.Error:
-				if e.Timeout() {
-					// This means that we hit our idleInterval, which is okay
-					// Return response to client, but leave connOut open
-					return
-				}
-			default:
-				log.Printf("Unexpected read error: %s", readErr)
-				// Unexpected error, close outbound connection
-				connOut.Close()
+// handleGET streams the data from the outbound connection to the client as
+// a response body.
+func (p *Proxy) handleGET(resp http.ResponseWriter, req *http.Request, connOut net.Conn) {
+	resp.WriteHeader(200)
+	done := make(chan interface{})
+	go func() {
+		for {
+			select {
+			case <-time.After(35 * time.Millisecond):
+				resp.(http.Flusher).Flush()
+			case <-done:
+				log.Println("handleGET() - Done")
 				return
 			}
 		}
-	}
+	}()
+	io.Copy(resp, connOut)
+	done <- true
 }
 
 // getLazyConn gets the lazyConn corresponding to the given id and addr
