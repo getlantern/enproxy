@@ -16,8 +16,10 @@ const (
 )
 
 var (
-	defaultIdleInterval = 15 * time.Millisecond
+	defaultIdleInterval = 35 * time.Millisecond
 	defaultIdleTimeout  = 70 * time.Second
+
+	emptyBuffer = []byte{}
 )
 
 // Conn is a net.Conn that tunnels its data via an httpconn.Proxy using HTTP
@@ -47,20 +49,28 @@ type Conn struct {
 	// Config: configuration of this Conn
 	Config *Config
 
-	// Self-reported FQDN of the proxy serving this connection.  This allows
-	// us to guarantee we reach the same server in subsequent requests, even
-	// if it was initially reached through a FQDN that may resolve to
-	// different IPs in different DNS lookups (e.g. as in DNS round robin).
-	proxyHost string
+	// proxyHostCh: Self-reported FQDN of the proxy serving this connection.
+	// This allows us to guarantee we reach the same server in subsequent
+	// requests, even if it was initially reached through a FQDN that may
+	// resolve to different IPs in different DNS lookups (e.g. as in DNS round
+	// robin).
+	proxyHostCh chan string
 
-	id string // unique identifier for this connection
+	// id: unique identifier for this connection
+	id string
 
 	/* Channels for processing reads, writes and closes */
-	writeRequestsCh  chan []byte        // requests to write
-	writeResponsesCh chan rwResponse    // responses for writes
-	readRequestsCh   chan []byte        // requests to read
-	readResponsesCh  chan rwResponse    // responses for reads
-	nextRequestCh    chan *http.Request // channel for next outgoing request
+	writeRequestsCh        chan []byte     // requests to write
+	writeResponsesCh       chan rwResponse // responses for writes
+	acceptingWrites        bool
+	acceptingWritesMutex   sync.RWMutex
+	readRequestsCh         chan []byte     // requests to read
+	readResponsesCh        chan rwResponse // responses for reads
+	acceptingReads         bool
+	acceptingReadsMutex    sync.RWMutex
+	reqOutCh               chan *io.PipeReader // channel for next outgoing request body
+	acceptingRequests      bool
+	acceptingRequestsMutex sync.RWMutex
 
 	/* Fields for tracking activity/closed status */
 	lastActivityTime  time.Time    // time of last read or write
@@ -69,7 +79,6 @@ type Conn struct {
 	closedMutex       sync.RWMutex // mutex controlling access to closed flag
 
 	/* Fields for tracking current request and response */
-	reqBody       *io.PipeReader // pipe reader for current request body
 	reqBodyWriter *io.PipeWriter // pipe writer to current request body
 	resp          *http.Response // the current response being used to read data
 }
@@ -114,7 +123,7 @@ func (c *Conn) RemoteAddr() net.Addr {
 
 // Write() implements the function from net.Conn
 func (c *Conn) Write(b []byte) (n int, err error) {
-	if c.isClosed() {
+	if !c.isAcceptingWrites() {
 		return 0, io.EOF
 	}
 	c.writeRequestsCh <- b
@@ -128,7 +137,7 @@ func (c *Conn) Write(b []byte) (n int, err error) {
 
 // Read() implements the function from net.Conn
 func (c *Conn) Read(b []byte) (n int, err error) {
-	if c.isClosed() {
+	if c.isAcceptingReads() {
 		return 0, io.EOF
 	}
 	c.readRequestsCh <- b

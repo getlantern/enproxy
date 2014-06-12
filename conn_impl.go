@@ -27,7 +27,7 @@ func (c *Conn) Connect() (err error) {
 
 	go c.processWrites()
 	go c.processReads()
-	go c.postRequests()
+	go c.processRequests()
 
 	return
 }
@@ -44,11 +44,12 @@ func (c *Conn) initDefaults() {
 // makeChannels makes all the channels that we need for processing read, write
 // and close requests on this connection.
 func (c *Conn) makeChannels() {
-	c.writeRequestsCh = make(chan []byte)
-	c.writeResponsesCh = make(chan rwResponse)
-	c.readRequestsCh = make(chan []byte)
-	c.readResponsesCh = make(chan rwResponse)
-	c.nextRequestCh = make(chan *http.Request)
+	c.proxyHostCh = make(chan string)
+	c.writeRequestsCh = make(chan []byte, 100)
+	c.writeResponsesCh = make(chan rwResponse, 100)
+	c.readRequestsCh = make(chan []byte, 100)
+	c.readResponsesCh = make(chan rwResponse, 100)
+	c.reqOutCh = make(chan *io.PipeReader, 100)
 }
 
 func (c *Conn) processWrites() {
@@ -58,6 +59,7 @@ func (c *Conn) processWrites() {
 			case <-c.writeRequestsCh:
 				c.writeResponsesCh <- rwResponse{0, io.EOF}
 			default:
+				c.Close()
 				close(c.writeRequestsCh)
 				return
 			}
@@ -73,15 +75,12 @@ func (c *Conn) processWrites() {
 		case b := <-c.writeRequestsCh:
 			// Consume writes as long as they keep coming in
 			if !c.processWrite(b) {
-				// Problem writing, stop processing
-				c.Close()
 				return
 			} else {
 				c.markActive()
 			}
 		case <-time.After(c.Config.IdleInterval):
 			if c.isIdle() {
-				// No activity for more than IdleTimeout, stop processing
 				c.Close()
 				return
 			}
@@ -105,6 +104,7 @@ func (c *Conn) processReads() {
 			case <-c.readRequestsCh:
 				c.readResponsesCh <- rwResponse{0, io.EOF}
 			default:
+				c.Close()
 				close(c.readRequestsCh)
 				return
 			}
@@ -115,20 +115,20 @@ func (c *Conn) processReads() {
 	// doesn't block the call to Conn.Start().
 	proxyConn, err := c.Config.DialProxy(c.Addr)
 	if err != nil {
+		log.Printf("Unable to dial proxy: %s", err)
 		return
 	}
 	defer proxyConn.Close()
 	bufReader := bufio.NewReader(proxyConn)
 
-	req, err := c.Config.NewRequest(c.proxyHost, "GET", nil)
+	// Wait for proxy host from first request
+	proxyHost := <-c.proxyHostCh
+
+	req, err := c.buildRequest(proxyHost, "GET", nil)
 	if err != nil {
 		log.Printf("Unable to construct request to proxy: %s", err)
 		return
 	}
-	// Send our connection id
-	req.Header.Set(X_HTTPCONN_ID, c.id)
-	// Send the address that we're trying to reach
-	req.Header.Set(X_HTTPCONN_DEST_ADDR, c.Addr)
 
 	err = req.Write(proxyConn)
 	if err != nil {
@@ -177,19 +177,19 @@ func (c *Conn) processReads() {
 	return
 }
 
-// postRequests handles writing outbound requests to the proxy.  Note - this is
-// not pipelined, because we cannot be sure that intervening proxies will
+// processRequests handles writing outbound requests to the proxy.  Note - this
+// is not pipelined, because we cannot be sure that intervening proxies will
 // deliver requests to the enproxy server in order. In-order delivery is
 // required because we are encapsulating a stream of data inside the bodies of
 // successive requests.
-func (c *Conn) postRequests() {
+func (c *Conn) processRequests() {
 	defer func() {
 		for {
 			select {
-			case <-c.nextRequestCh:
-				// ignore
+			case <-c.reqOutCh:
 			default:
-				close(c.nextRequestCh)
+				c.Close()
+				close(c.reqOutCh)
 				return
 			}
 		}
@@ -200,11 +200,13 @@ func (c *Conn) postRequests() {
 	proxyConn, err := c.Config.DialProxy(c.Addr)
 	if err != nil {
 		log.Printf("Unable to dial proxy: %s", err)
-		c.Close()
 		return
 	}
 	defer proxyConn.Close()
 	bufReader := bufio.NewReader(proxyConn)
+
+	var proxyHost string
+	first := true
 
 	for {
 		if c.isClosed() {
@@ -212,14 +214,20 @@ func (c *Conn) postRequests() {
 		}
 
 		select {
-		case req, ok := <-c.nextRequestCh:
+		case reqBody, ok := <-c.reqOutCh:
 			if !ok {
 				// done processing requests
 				return
 			}
 
+			// Construct a new HTTP POST to encapsulate our data
+			req, err := c.buildRequest(proxyHost, "POST", reqBody)
+			if err != nil {
+				log.Printf("Unable to construct POST request to proxy: %s", err)
+			}
+
 			// Write request
-			err := req.Write(proxyConn)
+			err = req.Write(proxyConn)
 			if err != nil {
 				log.Printf("Unexpected error writing write request: %s", err)
 				return
@@ -241,10 +249,12 @@ func (c *Conn) postRequests() {
 				return
 			}
 
-			// proxyHost := resp.Header.Get(X_HTTPCONN_PROXY_HOST)
-			// if proxyHost != "" {
-			// 	c.proxyHost = proxyHost
-			// }
+			if first {
+				// Lazily initialize proxyHost
+				proxyHost = resp.Header.Get(X_HTTPCONN_PROXY_HOST)
+				c.proxyHostCh <- proxyHost
+				first = false
+			}
 		case <-time.After(c.Config.IdleTimeout):
 			// Hit idle timeout without getting a new request, continue loop
 		}
@@ -256,10 +266,11 @@ func (c *Conn) postRequests() {
 func (c *Conn) processWrite(b []byte) (ok bool) {
 	if c.reqBodyWriter == nil {
 		// Lazily initialize our next request to the proxy
-		err := c.initRequestToProxy()
-		if err != nil {
-			c.writeResponsesCh <- rwResponse{0, err}
-			return false
+		// Construct a pipe for piping data to proxy
+		reqBody, reqBodyWriter := io.Pipe()
+		c.reqBodyWriter = reqBodyWriter
+		if c.isAcceptingRequests() {
+			c.reqOutCh <- reqBody
 		}
 	}
 
@@ -275,30 +286,18 @@ func (c *Conn) processWrite(b []byte) (ok bool) {
 	return true
 }
 
-// initRequestToProxy sets up a new request to encapsulate our writes to Proxy
-func (c *Conn) initRequestToProxy() error {
-	// Construct a pipe for piping data to proxy
-	c.reqBody, c.reqBodyWriter = io.Pipe()
-
-	// Construct a new HTTP POST to encapsulate our data
-	return c.post(c.reqBody)
-}
-
-// post posts a request with the given body to the proxy.  If writeImmediate is
-// true, the request is written before post returns.  Otherwise, the request is
-// written on a goroutine and post returns immediately.
-func (c *Conn) post(requestBody io.ReadCloser) (err error) {
-	req, err := c.Config.NewRequest(c.proxyHost, "POST", requestBody)
+// buildRequest builds a request using the given parameters and adding the
+// enproxy-specific headers.
+func (c *Conn) buildRequest(host string, method string, requestBody io.ReadCloser) (req *http.Request, err error) {
+	req, err = c.Config.NewRequest(host, method, requestBody)
 	if err != nil {
-		return fmt.Errorf("Unable to construct request to proxy: %s", err)
+		return nil, fmt.Errorf("Unable to construct request to proxy: %s", err)
 	}
 	// Send our connection id
 	req.Header.Set(X_HTTPCONN_ID, c.id)
 	// Send the address that we're trying to reach
 	req.Header.Set(X_HTTPCONN_DEST_ADDR, c.Addr)
-
-	c.nextRequestCh <- req
-	return nil
+	return
 }
 
 func (c *Conn) markActive() {
@@ -312,6 +311,42 @@ func (c *Conn) isIdle() bool {
 	defer c.lastActivityMutex.RUnlock()
 	timeSinceLastActivity := time.Now().Sub(c.lastActivityTime)
 	return timeSinceLastActivity > c.Config.IdleTimeout
+}
+
+func (c *Conn) isAcceptingWrites() bool {
+	c.acceptingWritesMutex.RLock()
+	defer c.acceptingWritesMutex.RUnlock()
+	return c.acceptingWrites
+}
+
+func (c *Conn) stopAcceptingWrites() {
+	c.acceptingWritesMutex.Lock()
+	defer c.acceptingWritesMutex.Unlock()
+	c.acceptingWrites = false
+}
+
+func (c *Conn) isAcceptingReads() bool {
+	c.acceptingReadsMutex.RLock()
+	defer c.acceptingReadsMutex.RUnlock()
+	return c.acceptingReads
+}
+
+func (c *Conn) stopAcceptingReads() {
+	c.acceptingReadsMutex.Lock()
+	defer c.acceptingReadsMutex.Unlock()
+	c.acceptingReads = false
+}
+
+func (c *Conn) isAcceptingRequests() bool {
+	c.acceptingRequestsMutex.RLock()
+	defer c.acceptingRequestsMutex.RUnlock()
+	return c.acceptingRequests
+}
+
+func (c *Conn) stopAcceptingRequests() {
+	c.acceptingRequestsMutex.Lock()
+	defer c.acceptingRequestsMutex.Unlock()
+	c.acceptingRequests = false
 }
 
 func BadGateway(w io.Writer, msg string) {

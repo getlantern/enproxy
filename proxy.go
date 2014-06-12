@@ -108,9 +108,8 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 func (p *Proxy) handlePOST(resp http.ResponseWriter, req *http.Request, connOut net.Conn) {
 	// Pipe request
 	_, err := io.Copy(connOut, req.Body)
-	if err != nil {
+	if err != nil && err != io.EOF {
 		badGateway(resp, fmt.Sprintf("Unable to write to connOut: %s", err))
-		connOut.Close()
 		return
 	}
 	resp.WriteHeader(200)
@@ -125,13 +124,17 @@ func (p *Proxy) handleGET(resp http.ResponseWriter, req *http.Request, connOut n
 		for {
 			select {
 			case <-time.After(p.FlushInterval):
+				// Periodically flush the response to make sure it gets to client
 				resp.(http.Flusher).Flush()
 			case <-done:
 				return
 			}
 		}
 	}()
-	io.Copy(resp, connOut)
+	_, err := io.Copy(resp, connOut)
+	if err == nil {
+		err = io.EOF
+	}
 	done <- true
 }
 
@@ -151,5 +154,4 @@ func badGateway(resp http.ResponseWriter, msg string) {
 	log.Printf("Responding bad gateway: %s", msg)
 	resp.Header().Set("Connection", "close")
 	resp.WriteHeader(BAD_GATEWAY)
-	fmt.Fprintf(resp, "No id found in header %s", X_HTTPCONN_ID)
 }
