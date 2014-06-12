@@ -33,21 +33,8 @@ func (c *Conn) Connect() (err error) {
 }
 
 func (c *Conn) initDefaults() {
-	if c.Config.PollInterval == 0 {
-		c.Config.PollInterval = defaultPollInterval
-	}
-	if c.Config.DefaultTimeoutProfile == nil {
-		c.Config.DefaultTimeoutProfile = defaultTimoutProfile
-	}
-	if c.Config.TimeoutProfilesByPort == nil {
-		c.Config.TimeoutProfilesByPort = make(map[string]*TimeoutProfile)
-	}
-	for port, defaultProfile := range defaultWriteTimeoutProfilesByPort {
-		_, exists := c.Config.TimeoutProfilesByPort[port]
-		if !exists {
-			// Merge default into map
-			c.Config.TimeoutProfilesByPort[port] = defaultProfile
-		}
+	if c.Config.IdleInterval == 0 {
+		c.Config.IdleInterval = defaultIdleInterval
 	}
 	if c.Config.IdleTimeout == 0 {
 		c.Config.IdleTimeout = defaultIdleTimeout
@@ -77,18 +64,11 @@ func (c *Conn) processWrites() {
 		}
 	}()
 
-	port := strings.Split(c.Addr, ":")[1]
-	tp := c.Config.TimeoutProfilesByPort[port]
-	if tp == nil {
-		tp = c.Config.DefaultTimeoutProfile
-	}
-
 	for {
 		if c.isClosed() {
 			return
 		}
 
-		timeout := 35 * time.Millisecond
 		select {
 		case b := <-c.writeRequestsCh:
 			// Consume writes as long as they keep coming in
@@ -99,7 +79,7 @@ func (c *Conn) processWrites() {
 			} else {
 				c.markActive()
 			}
-		case <-time.After(timeout):
+		case <-time.After(c.Config.IdleInterval):
 			if c.isIdle() {
 				// No activity for more than IdleTimeout, stop processing
 				c.Close()
@@ -177,17 +157,21 @@ func (c *Conn) processReads() {
 			return
 		}
 
-		b := <-c.readRequestsCh
-		n, err := resp.Body.Read(b)
-		if n > 0 {
-			c.markActive()
-		}
-		c.readResponsesCh <- rwResponse{n, err}
-		if err != nil {
-			if err != io.EOF {
-				log.Printf("Unexpected error reading from proxyConn: %s", err)
+		select {
+		case b := <-c.readRequestsCh:
+			n, err := resp.Body.Read(b)
+			if n > 0 {
+				c.markActive()
 			}
-			return
+			c.readResponsesCh <- rwResponse{n, err}
+			if err != nil {
+				if err != io.EOF {
+					log.Printf("Unexpected error reading from proxyConn: %s", err)
+				}
+				return
+			}
+		case <-time.After(c.Config.IdleTimeout):
+			// Haven't read within our idle timeout, continue loop
 		}
 	}
 	return
@@ -227,39 +211,43 @@ func (c *Conn) postRequests() {
 			return
 		}
 
-		req, ok := <-c.nextRequestCh
-		if !ok {
-			// done processing requests
-			return
-		}
+		select {
+		case req, ok := <-c.nextRequestCh:
+			if !ok {
+				// done processing requests
+				return
+			}
 
-		// Write request
-		err := req.Write(proxyConn)
-		if err != nil {
-			log.Printf("Unexpected error writing write request: %s", err)
-			return
-		}
+			// Write request
+			err := req.Write(proxyConn)
+			if err != nil {
+				log.Printf("Unexpected error writing write request: %s", err)
+				return
+			}
 
-		// Read corresponding response
-		resp, err := http.ReadResponse(bufReader, nil)
-		if err != nil {
-			log.Printf("Unexpected error reading write response: %s", err)
-			return
-		}
+			// Read corresponding response
+			resp, err := http.ReadResponse(bufReader, nil)
+			if err != nil {
+				log.Printf("Unexpected error reading write response: %s", err)
+				return
+			}
 
-		// Check response status
-		responseOK := resp.StatusCode >= 200 && resp.StatusCode < 300
-		if !responseOK {
-			respText := bytes.NewBuffer(nil)
-			resp.Write(respText)
-			log.Printf("Bad response status for write: %d\n%s\n", resp.StatusCode, string(respText.Bytes()))
-			return
-		}
+			// Check response status
+			responseOK := resp.StatusCode >= 200 && resp.StatusCode < 300
+			if !responseOK {
+				respText := bytes.NewBuffer(nil)
+				resp.Write(respText)
+				log.Printf("Bad response status for write: %d\n%s\n", resp.StatusCode, string(respText.Bytes()))
+				return
+			}
 
-		// proxyHost := resp.Header.Get(X_HTTPCONN_PROXY_HOST)
-		// if proxyHost != "" {
-		// 	c.proxyHost = proxyHost
-		// }
+			// proxyHost := resp.Header.Get(X_HTTPCONN_PROXY_HOST)
+			// if proxyHost != "" {
+			// 	c.proxyHost = proxyHost
+			// }
+		case <-time.After(c.Config.IdleTimeout):
+			// Hit idle timeout without getting a new request, continue loop
+		}
 	}
 }
 

@@ -16,46 +16,8 @@ const (
 )
 
 var (
-	defaultPollInterval = 50 * time.Millisecond
+	defaultIdleInterval = 15 * time.Millisecond
 	defaultIdleTimeout  = 70 * time.Second
-
-	shortTimeout          = 35 * time.Millisecond
-	mediumTimeout         = 350 * time.Millisecond
-	longTimeout           = 1000 * time.Millisecond
-	largeFileCutoff       = 50000
-	reallyLargeFileCutoff = 250000
-
-	// defaultTimeoutProfile is optimized for low latency
-	defaultTimoutProfile = NewTimeoutProfile(shortTimeout)
-
-	// defaultReadTimeoutProfilesByPort
-	//
-	// Read timeout profiles are determined based on the following heuristic:
-	//
-	// HTTP - typically the latency to first response on an HTTP request will be
-	//        high because the server has to prepare/find and then return the
-	//        content.  Once the content starts streaming, reads should proceed
-	//        relatively quickly.  If we're reading a lot of data (say more than
-	//        50Kb, then we're possibly looking at a large file download, which
-	//        we want to make sure streams completely in one response, so we set
-	//        a bigger read timeout)
-	//
-	// HTTPS - the initial traffic is all handshaking, which needs to proceed
-	//         with as low latency as possible, so we use a short timeout.  If
-	//         we enter into a large file scenario, then we bump up the timeout
-	//         to provide more complete streaming responses.
-	//
-	defaultReadTimeoutProfilesByPort = map[string]*TimeoutProfile{
-		"80":  NewTimeoutProfile(longTimeout).WithTimeoutAfter(1, shortTimeout).WithTimeoutAfter(largeFileCutoff, mediumTimeout).WithTimeoutAfter(reallyLargeFileCutoff, longTimeout),
-		"443": NewTimeoutProfile(shortTimeout).WithTimeoutAfter(largeFileCutoff, mediumTimeout).WithTimeoutAfter(reallyLargeFileCutoff, longTimeout),
-	}
-
-	defaultWriteTimeoutProfilesByPort = map[string]*TimeoutProfile{
-		"80":  NewTimeoutProfile(shortTimeout).WithTimeoutAfter(largeFileCutoff, mediumTimeout).WithTimeoutAfter(reallyLargeFileCutoff, longTimeout),
-		"443": NewTimeoutProfile(shortTimeout).WithTimeoutAfter(largeFileCutoff, mediumTimeout).WithTimeoutAfter(reallyLargeFileCutoff, longTimeout),
-	}
-
-	emptyBuffer = []byte{}
 )
 
 // Conn is a net.Conn that tunnels its data via an httpconn.Proxy using HTTP
@@ -130,17 +92,9 @@ type Config struct {
 	// NewRequest: function to create a new request to the proxy
 	NewRequest newRequestFunc
 
-	// DefaultTimeoutProfile: default profile determining write timeouts based on
-	// bytes read
-	DefaultTimeoutProfile *TimeoutProfile
-
-	// TimeoutProfilesByPort: profiles determining write timeouts based on bytes
-	// read, with a different profile by port
-	TimeoutProfilesByPort map[string]*TimeoutProfile
-
-	// PollInterval: how frequently to poll (i.e. create a new request/response)
-	// , defaults to 50 ms
-	PollInterval time.Duration
+	// IdleInterval: how long to let the write idle before writing out a
+	// request to the proxy.  Defaults to 15 milliseconds.
+	IdleInterval time.Duration
 
 	// IdleTimeout: how long to wait before closing an idle connection, defaults
 	// to 70 seconds.  The high default value is selected to work well with XMPP

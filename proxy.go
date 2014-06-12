@@ -15,6 +15,10 @@ const (
 	DEFAULT_BUFFER_SIZE = 8096
 )
 
+var (
+	defaultFlushInterval = 35 * time.Millisecond
+)
+
 // Proxy is the server side to an enproxy.Client.  Proxy implements the
 // http.Handler interface for plugging into an HTTP server, and it also
 // provides a convenience ListenAndServe() function for quickly starting up
@@ -28,21 +32,13 @@ type Proxy struct {
 	// if this server was originally reached by e.g. DNS round robin.
 	Host string
 
-	// DefaultTimeoutProfile: default profile determining read timeouts based on
-	// bytes read
-	DefaultTimeoutProfile *TimeoutProfile
-
-	// TimeoutProfilesByPort: profiles determining read timeouts based on bytes
-	// read, with a different profile by port
-	TimeoutProfilesByPort map[string]*TimeoutProfile
+	// FlushInterval: how frequently to flush the response to the client,
+	// defaults to 35ms.
+	FlushInterval time.Duration
 
 	// IdleTimeout: how long to wait before closing an idle connection, defaults
 	// to 70 seconds
 	IdleTimeout time.Duration
-
-	// BufferSize: controls the size of the buffers used for copying data from
-	// outbound to inbound connections.  If given as 0, defaults to 8096 bytes.
-	BufferSize int
 
 	connMap map[string]*lazyConn // map of outbound connections by their id
 
@@ -56,24 +52,11 @@ func (p *Proxy) Start() {
 			return net.Dial("tcp", addr)
 		}
 	}
-	if p.DefaultTimeoutProfile == nil {
-		p.DefaultTimeoutProfile = defaultTimoutProfile
-	}
-	if p.TimeoutProfilesByPort == nil {
-		p.TimeoutProfilesByPort = make(map[string]*TimeoutProfile)
-	}
-	for port, defaultProfile := range defaultReadTimeoutProfilesByPort {
-		_, exists := p.TimeoutProfilesByPort[port]
-		if !exists {
-			// Merge default into map
-			p.TimeoutProfilesByPort[port] = defaultProfile
-		}
+	if p.FlushInterval == 0 {
+		p.FlushInterval = defaultFlushInterval
 	}
 	if p.IdleTimeout == 0 {
 		p.IdleTimeout = defaultIdleTimeout
-	}
-	if p.BufferSize == 0 {
-		p.BufferSize = DEFAULT_BUFFER_SIZE
 	}
 	p.connMap = make(map[string]*lazyConn)
 }
@@ -141,10 +124,9 @@ func (p *Proxy) handleGET(resp http.ResponseWriter, req *http.Request, connOut n
 	go func() {
 		for {
 			select {
-			case <-time.After(35 * time.Millisecond):
+			case <-time.After(p.FlushInterval):
 				resp.(http.Flusher).Flush()
 			case <-done:
-				log.Println("handleGET() - Done")
 				return
 			}
 		}
