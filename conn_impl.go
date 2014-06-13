@@ -98,6 +98,8 @@ func (c *Conn) processWrites() {
 // haven't received a read request.
 func (c *Conn) processReads() {
 	var proxyConn net.Conn
+	var bufReader *bufio.Reader
+	var resp *http.Response
 	var err error
 
 	defer func() {
@@ -113,48 +115,27 @@ func (c *Conn) processReads() {
 				if proxyConn != nil {
 					proxyConn.Close()
 				}
+				if resp != nil {
+					resp.Body.Close()
+				}
 				return
 			}
 		}
 	}()
 
-	// Dial proxy (we do this inside here so that it's on a goroutine and
-	// doesn't block the call to Conn.Start().
-	proxyConn, err = c.Config.DialProxy(c.Addr)
+	// Dial proxy
+	proxyConn, bufReader, err = c.dialProxy()
 	if err != nil {
-		log.Printf("Unable to dial proxy: %s", err)
+		log.Println(err)
 		return
 	}
-	bufReader := bufio.NewReader(proxyConn)
 
 	// Wait for proxy host from first request
 	proxyHost := <-c.proxyHostCh
 
-	req, err := c.buildRequest(proxyHost, "GET", nil)
+	resp, err = c.doRequest(proxyConn, bufReader, proxyHost, "GET", nil)
 	if err != nil {
-		log.Printf("Unable to construct request to proxy: %s", err)
-		return
-	}
-
-	err = req.Write(proxyConn)
-	if err != nil {
-		log.Printf("Error requesting read response data: %s", err)
-		return
-	}
-
-	resp, err := http.ReadResponse(bufReader, req)
-	if err != nil {
-		log.Printf("Error reading read response: %s", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	// Check response status
-	responseOK := resp.StatusCode >= 200 && resp.StatusCode < 300
-	if !responseOK {
-		respText := bytes.NewBuffer(nil)
-		resp.Write(respText)
-		log.Printf("Bad response status for read: %d\n%s\n", resp.StatusCode, string(respText.Bytes()))
+		log.Printf("Unable to dial proxy for GETing response: %s", err)
 		return
 	}
 
@@ -165,13 +146,39 @@ func (c *Conn) processReads() {
 
 		select {
 		case b := <-c.readRequestsCh:
+			// Make new request if necessary
+			if resp == nil {
+				proxyConn, bufReader, err = c.redialProxyIfNecessary(proxyConn, bufReader)
+				if err != nil {
+					log.Printf("Unable to redial proxy for GETing response: %s", err)
+					return
+				}
+
+				resp, err = c.doRequest(proxyConn, bufReader, proxyHost, "GET", nil)
+				if err != nil {
+					log.Printf("Unable to do GET request: %s", err)
+					return
+				}
+			}
+
+			// Read
 			n, err := resp.Body.Read(b)
 			if n > 0 {
 				c.markActive()
 			}
-			c.readResponsesCh <- rwResponse{n, err}
+
+			errToClient := err
+			if err == io.EOF {
+				// Don't propagate EOF to client
+				errToClient = nil
+			}
+			c.readResponsesCh <- rwResponse{n, errToClient}
 			if err != nil {
-				if err != io.EOF {
+				if err == io.EOF {
+					// Finish old response
+					resp.Body.Close()
+					resp = nil
+				} else {
 					log.Printf("Unexpected error reading from proxyConn: %s", err)
 				}
 				return
@@ -190,6 +197,8 @@ func (c *Conn) processReads() {
 // successive requests.
 func (c *Conn) processRequests() {
 	var proxyConn net.Conn
+	var bufReader *bufio.Reader
+	var resp *http.Response
 	var err error
 
 	defer func() {
@@ -204,19 +213,20 @@ func (c *Conn) processRequests() {
 				if proxyConn != nil {
 					proxyConn.Close()
 				}
+				if resp != nil {
+					resp.Body.Close()
+				}
 				return
 			}
 		}
 	}()
 
-	// Dial proxy (we do this inside here so that it's on a goroutine and
-	// doesn't block the call to Conn.Start().
-	proxyConn, err = c.Config.DialProxy(c.Addr)
+	// Dial proxy
+	proxyConn, bufReader, err = c.dialProxy()
 	if err != nil {
-		log.Printf("Unable to dial proxy: %s", err)
+		log.Printf("Unable to dial proxy for POSTing request: %s", err)
 		return
 	}
-	bufReader := bufio.NewReader(proxyConn)
 
 	var proxyHost string
 	first := true
@@ -233,32 +243,15 @@ func (c *Conn) processRequests() {
 				return
 			}
 
-			// Construct a new HTTP POST to encapsulate our data
-			req, err := c.buildRequest(proxyHost, "POST", reqBody)
+			proxyConn, bufReader, err = c.redialProxyIfNecessary(proxyConn, bufReader)
 			if err != nil {
-				log.Printf("Unable to construct POST request to proxy: %s", err)
-			}
-
-			// Write request
-			err = req.Write(proxyConn)
-			if err != nil {
-				log.Printf("Unexpected error writing write request: %s", err)
+				log.Printf("Unable to redial proxy for POSTing request: %s", err)
 				return
 			}
 
-			// Read corresponding response
-			resp, err := http.ReadResponse(bufReader, nil)
+			resp, err = c.doRequest(proxyConn, bufReader, proxyHost, "POST", reqBody)
 			if err != nil {
-				log.Printf("Unexpected error reading write response: %s", err)
-				return
-			}
-
-			// Check response status
-			responseOK := resp.StatusCode >= 200 && resp.StatusCode < 300
-			if !responseOK {
-				respText := bytes.NewBuffer(nil)
-				resp.Write(respText)
-				log.Printf("Bad response status for write: %d\n%s\n", resp.StatusCode, string(respText.Bytes()))
+				log.Printf("Unable to do POST request: %s", err)
 				return
 			}
 
@@ -297,6 +290,73 @@ func (c *Conn) processWrite(b []byte) (ok bool) {
 	// Let the caller know how much we wrote
 	c.writeResponsesCh <- rwResponse{n, nil}
 	return true
+}
+
+func (c *Conn) dialProxy() (proxyConn net.Conn, bufReader *bufio.Reader, err error) {
+	proxyConn, err = c.Config.DialProxy(c.Addr)
+	if err != nil {
+		err = fmt.Errorf("Unable to dial proxy: %s", err)
+		return
+	}
+	bufReader = bufio.NewReader(proxyConn)
+	return
+}
+
+func (c *Conn) redialProxyIfNecessary(origProxyConn net.Conn, origBufReader *bufio.Reader) (proxyConn net.Conn, bufReader *bufio.Reader, err error) {
+	// Default to keeping the same connection
+	proxyConn = origProxyConn
+	bufReader = origBufReader
+
+	// Make sure connection is still open and redial if necessary
+	origProxyConn.SetReadDeadline(time.Now())
+	_, err = origBufReader.Peek(1)
+	origProxyConn.SetReadDeadline(time.Time{})
+	if err == io.EOF {
+		log.Println("Redialing proxy")
+		// Close original connection
+		origProxyConn.Close()
+		// Dial again
+		proxyConn, bufReader, err = c.dialProxy()
+		if err != nil {
+			log.Println(err)
+			return
+		}
+	} else {
+		err = nil
+	}
+	return
+}
+
+func (c *Conn) doRequest(proxyConn net.Conn, bufReader *bufio.Reader, host string, method string, body io.ReadCloser) (resp *http.Response, err error) {
+	req, err := c.buildRequest(host, method, body)
+	if err != nil {
+		err = fmt.Errorf("Unable to construct request to proxy: %s", err)
+		return
+	}
+
+	err = req.Write(proxyConn)
+	if err != nil {
+		err = fmt.Errorf("Error sending request to proxy: %s", err)
+		return
+	}
+
+	resp, err = http.ReadResponse(bufReader, req)
+	if err != nil {
+		err = fmt.Errorf("Error reading response from proxy: %s", err)
+		return
+	}
+
+	// Check response status
+	responseOK := resp.StatusCode >= 200 && resp.StatusCode < 300
+	if !responseOK {
+		respText := bytes.NewBuffer(nil)
+		resp.Write(respText)
+		err = fmt.Errorf("Bad response status for read: %d\n%s\n", resp.StatusCode, string(respText.Bytes()))
+		resp.Body.Close()
+		resp = nil
+	}
+
+	return
 }
 
 // buildRequest builds a request using the given parameters and adding the
