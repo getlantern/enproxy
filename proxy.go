@@ -16,7 +16,7 @@ const (
 )
 
 var (
-	defaultFlushInterval = 50 * time.Millisecond
+	defaultFlushInterval = 15 * time.Millisecond
 )
 
 // Proxy is the server side to an enproxy.Client.  Proxy implements the
@@ -119,6 +119,12 @@ func (p *Proxy) handlePOST(resp http.ResponseWriter, req *http.Request, connOut 
 // a response body.  If no data is read for more than FlushInterval, then the
 // response is finished and client needs to make a new GET request.
 func (p *Proxy) handleGET(resp http.ResponseWriter, req *http.Request, lc *lazyConn, connOut net.Conn) {
+	if lc.hitEOF {
+		resp.Header().Set(X_HTTPCONN_EOF, "true")
+		resp.WriteHeader(200)
+		return
+	}
+
 	resp.Header().Set("X-Accel-Buffering", "no")
 	resp.WriteHeader(200)
 	mlw := &maxLatencyWriter{
@@ -129,7 +135,15 @@ func (p *Proxy) handleGET(resp http.ResponseWriter, req *http.Request, lc *lazyC
 	go mlw.flushLoop()
 	defer mlw.stop()
 
-	io.Copy(mlw, connOut)
+	connOut.SetReadDeadline(time.Now().Add(30 * time.Second))
+	_, err := io.Copy(mlw, connOut)
+	if err == nil {
+		// Try an additional read to check for EOF
+		_, err = connOut.Read(emptyBuffer)
+	}
+	if err == io.EOF {
+		lc.hitEOF = true
+	}
 }
 
 // getLazyConn gets the lazyConn corresponding to the given id and addr

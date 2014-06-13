@@ -11,6 +11,7 @@ import (
 const (
 	X_HTTPCONN_ID         = "X-HTTPConn-Id"
 	X_HTTPCONN_DEST_ADDR  = "X-HTTPConn-Dest-Addr"
+	X_HTTPCONN_EOF        = "X-HTTPConn-EOF"
 	X_HTTPCONN_PROXY_HOST = "X-HTTPConn-Proxy-Host"
 )
 

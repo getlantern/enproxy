@@ -14,6 +14,7 @@ type lazyConn struct {
 	id        string
 	addr      string
 	bytesRead int
+	hitEOF    bool
 	connOut   net.Conn
 	err       error
 	mutex     sync.Mutex
