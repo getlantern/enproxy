@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -45,11 +46,11 @@ func (c *Conn) initDefaults() {
 // and close requests on this connection.
 func (c *Conn) makeChannels() {
 	c.proxyHostCh = make(chan string)
-	c.writeRequestsCh = make(chan []byte, 100)
-	c.writeResponsesCh = make(chan rwResponse, 100)
-	c.readRequestsCh = make(chan []byte, 100)
-	c.readResponsesCh = make(chan rwResponse, 100)
-	c.reqOutCh = make(chan *io.PipeReader, 100)
+	c.writeRequestsCh = make(chan []byte)
+	c.writeResponsesCh = make(chan rwResponse)
+	c.readRequestsCh = make(chan []byte)
+	c.readResponsesCh = make(chan rwResponse)
+	c.reqOutCh = make(chan *io.PipeReader)
 }
 
 func (c *Conn) processWrites() {
@@ -82,10 +83,6 @@ func (c *Conn) processWrites() {
 				c.markActive()
 			}
 		case <-time.After(c.Config.IdleInterval):
-			if c.isIdle() {
-				c.Close()
-				return
-			}
 			// We waited more than PollInterval for a write, close our request
 			// body writer so that it can get flushed to the server
 			if c.reqBodyWriter != nil {
@@ -100,6 +97,9 @@ func (c *Conn) processWrites() {
 // our encapsulated HTTP request, or we've hit our idle interval and still
 // haven't received a read request.
 func (c *Conn) processReads() {
+	var proxyConn net.Conn
+	var err error
+
 	defer func() {
 		for {
 			c.readMutex.Lock()
@@ -110,6 +110,9 @@ func (c *Conn) processReads() {
 			default:
 				c.doneReading = true
 				close(c.readRequestsCh)
+				if proxyConn != nil {
+					proxyConn.Close()
+				}
 				return
 			}
 		}
@@ -117,12 +120,11 @@ func (c *Conn) processReads() {
 
 	// Dial proxy (we do this inside here so that it's on a goroutine and
 	// doesn't block the call to Conn.Start().
-	proxyConn, err := c.Config.DialProxy(c.Addr)
+	proxyConn, err = c.Config.DialProxy(c.Addr)
 	if err != nil {
 		log.Printf("Unable to dial proxy: %s", err)
 		return
 	}
-	defer proxyConn.Close()
 	bufReader := bufio.NewReader(proxyConn)
 
 	// Wait for proxy host from first request
@@ -187,6 +189,9 @@ func (c *Conn) processReads() {
 // required because we are encapsulating a stream of data inside the bodies of
 // successive requests.
 func (c *Conn) processRequests() {
+	var proxyConn net.Conn
+	var err error
+
 	defer func() {
 		for {
 			c.requestMutex.Lock()
@@ -196,6 +201,9 @@ func (c *Conn) processRequests() {
 			default:
 				c.doneRequesting = true
 				close(c.reqOutCh)
+				if proxyConn != nil {
+					proxyConn.Close()
+				}
 				return
 			}
 		}
@@ -203,12 +211,11 @@ func (c *Conn) processRequests() {
 
 	// Dial proxy (we do this inside here so that it's on a goroutine and
 	// doesn't block the call to Conn.Start().
-	proxyConn, err := c.Config.DialProxy(c.Addr)
+	proxyConn, err = c.Config.DialProxy(c.Addr)
 	if err != nil {
 		log.Printf("Unable to dial proxy: %s", err)
 		return
 	}
-	defer proxyConn.Close()
 	bufReader := bufio.NewReader(proxyConn)
 
 	var proxyHost string

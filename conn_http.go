@@ -34,19 +34,19 @@ func (c *Config) Intercept(resp http.ResponseWriter, req *http.Request) {
 // proxied proxies via an enproxy.Proxy
 func (c *Config) proxied(resp http.ResponseWriter, req *http.Request, clientConn net.Conn, buffClientConn *bufio.ReadWriter, addr string) {
 	// Establish outbound connection
-	proxyConn := &Conn{
+	connOut := &Conn{
 		Addr:   addr,
 		Config: c,
 	}
-	proxyConn.Connect()
-	defer proxyConn.Close()
+	connOut.Connect()
+	defer connOut.Close()
 
-	pipeData(clientConn, buffClientConn, proxyConn, req)
+	pipeData(clientConn, buffClientConn, connOut, req)
 }
 
 // pipeData pipes data between the client and proxy connections.  It's also
 // responsible for responding to the initial CONNECT request with a 200 OK.
-func pipeData(clientConn net.Conn, buffClientConn *bufio.ReadWriter, proxyConn *Conn, req *http.Request) {
+func pipeData(clientConn net.Conn, buffClientConn *bufio.ReadWriter, connOut *Conn, req *http.Request) {
 	// Pipe data between inbound and outbound connections
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -59,13 +59,13 @@ func pipeData(clientConn net.Conn, buffClientConn *bufio.ReadWriter, proxyConn *
 			log.Printf("Unable to respond OK: %s", err)
 			return
 		}
-		io.Copy(proxyConn, buffClientConn)
+		io.Copy(connOut, buffClientConn)
 	}()
 
 	// Copy from proxy to client
 	go func() {
 		defer wg.Done()
-		io.Copy(clientConn, proxyConn)
+		io.Copy(clientConn, connOut)
 	}()
 	wg.Wait()
 }

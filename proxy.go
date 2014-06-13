@@ -119,23 +119,14 @@ func (p *Proxy) handlePOST(resp http.ResponseWriter, req *http.Request, connOut 
 // a response body.
 func (p *Proxy) handleGET(resp http.ResponseWriter, req *http.Request, connOut net.Conn) {
 	resp.WriteHeader(200)
-	done := make(chan interface{})
-	go func() {
-		for {
-			select {
-			case <-time.After(p.FlushInterval):
-				// Periodically flush the response to make sure it gets to client
-				resp.(http.Flusher).Flush()
-			case <-done:
-				return
-			}
-		}
-	}()
-	_, err := io.Copy(resp, connOut)
-	if err == nil {
-		err = io.EOF
+	mlw := &maxLatencyWriter{
+		dst:     resp,
+		latency: p.FlushInterval,
+		done:    make(chan bool),
 	}
-	done <- true
+	go mlw.flushLoop()
+	defer mlw.stop()
+	io.Copy(mlw, connOut)
 }
 
 // getLazyConn gets the lazyConn corresponding to the given id and addr
@@ -155,3 +146,35 @@ func badGateway(resp http.ResponseWriter, msg string) {
 	resp.Header().Set("Connection", "close")
 	resp.WriteHeader(BAD_GATEWAY)
 }
+
+// Taken from package net/http/httputil
+type maxLatencyWriter struct {
+	dst     http.ResponseWriter
+	latency time.Duration
+
+	lk   sync.Mutex // protects Write + Flush
+	done chan bool
+}
+
+func (m *maxLatencyWriter) Write(p []byte) (int, error) {
+	m.lk.Lock()
+	defer m.lk.Unlock()
+	return m.dst.Write(p)
+}
+
+func (m *maxLatencyWriter) flushLoop() {
+	t := time.NewTicker(m.latency)
+	defer t.Stop()
+	for {
+		select {
+		case <-m.done:
+			return
+		case <-t.C:
+			m.lk.Lock()
+			m.dst.(http.Flusher).Flush()
+			m.lk.Unlock()
+		}
+	}
+}
+
+func (m *maxLatencyWriter) stop() { m.done <- true }
