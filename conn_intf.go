@@ -60,17 +60,17 @@ type Conn struct {
 	id string
 
 	/* Channels for processing reads, writes and closes */
-	writeRequestsCh        chan []byte     // requests to write
-	writeResponsesCh       chan rwResponse // responses for writes
-	acceptingWrites        bool
-	acceptingWritesMutex   sync.RWMutex
-	readRequestsCh         chan []byte     // requests to read
-	readResponsesCh        chan rwResponse // responses for reads
-	acceptingReads         bool
-	acceptingReadsMutex    sync.RWMutex
-	reqOutCh               chan *io.PipeReader // channel for next outgoing request body
-	acceptingRequests      bool
-	acceptingRequestsMutex sync.RWMutex
+	writeRequestsCh  chan []byte     // requests to write
+	writeResponsesCh chan rwResponse // responses for writes
+	doneWriting      bool
+	writeMutex       sync.RWMutex
+	readRequestsCh   chan []byte     // requests to read
+	readResponsesCh  chan rwResponse // responses for reads
+	doneReading      bool
+	readMutex        sync.RWMutex
+	reqOutCh         chan *io.PipeReader // channel for next outgoing request body
+	doneRequesting   bool
+	requestMutex     sync.RWMutex
 
 	/* Fields for tracking activity/closed status */
 	lastActivityTime  time.Time    // time of last read or write
@@ -123,29 +123,29 @@ func (c *Conn) RemoteAddr() net.Addr {
 
 // Write() implements the function from net.Conn
 func (c *Conn) Write(b []byte) (n int, err error) {
-	if !c.isAcceptingWrites() {
-		return 0, io.EOF
-	}
-	c.writeRequestsCh <- b
-	res, ok := <-c.writeResponsesCh
-	if !ok {
-		return 0, io.EOF
+	if c.submitWrite(b) {
+		res, ok := <-c.writeResponsesCh
+		if !ok {
+			return 0, io.EOF
+		} else {
+			return res.n, res.err
+		}
 	} else {
-		return res.n, res.err
+		return 0, io.EOF
 	}
 }
 
 // Read() implements the function from net.Conn
 func (c *Conn) Read(b []byte) (n int, err error) {
-	if c.isAcceptingReads() {
-		return 0, io.EOF
-	}
-	c.readRequestsCh <- b
-	res, ok := <-c.readResponsesCh
-	if !ok {
-		return 0, io.EOF
+	if c.submitRead(b) {
+		res, ok := <-c.readResponsesCh
+		if !ok {
+			return 0, io.EOF
+		} else {
+			return res.n, res.err
+		}
 	} else {
-		return res.n, res.err
+		return 0, io.EOF
 	}
 }
 

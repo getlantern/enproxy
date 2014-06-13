@@ -55,11 +55,13 @@ func (c *Conn) makeChannels() {
 func (c *Conn) processWrites() {
 	defer func() {
 		for {
+			c.writeMutex.Lock()
+			defer c.writeMutex.Unlock()
 			select {
 			case <-c.writeRequestsCh:
 				c.writeResponsesCh <- rwResponse{0, io.EOF}
 			default:
-				c.Close()
+				c.doneWriting = true
 				close(c.writeRequestsCh)
 				return
 			}
@@ -100,11 +102,13 @@ func (c *Conn) processWrites() {
 func (c *Conn) processReads() {
 	defer func() {
 		for {
+			c.readMutex.Lock()
+			defer c.readMutex.Unlock()
 			select {
 			case <-c.readRequestsCh:
 				c.readResponsesCh <- rwResponse{0, io.EOF}
 			default:
-				c.Close()
+				c.doneReading = true
 				close(c.readRequestsCh)
 				return
 			}
@@ -185,10 +189,12 @@ func (c *Conn) processReads() {
 func (c *Conn) processRequests() {
 	defer func() {
 		for {
+			c.requestMutex.Lock()
+			defer c.requestMutex.Unlock()
 			select {
 			case <-c.reqOutCh:
 			default:
-				c.Close()
+				c.doneRequesting = true
 				close(c.reqOutCh)
 				return
 			}
@@ -269,8 +275,8 @@ func (c *Conn) processWrite(b []byte) (ok bool) {
 		// Construct a pipe for piping data to proxy
 		reqBody, reqBodyWriter := io.Pipe()
 		c.reqBodyWriter = reqBodyWriter
-		if c.isAcceptingRequests() {
-			c.reqOutCh <- reqBody
+		if !c.submitRequest(reqBody) {
+			return false
 		}
 	}
 
@@ -313,40 +319,37 @@ func (c *Conn) isIdle() bool {
 	return timeSinceLastActivity > c.Config.IdleTimeout
 }
 
-func (c *Conn) isAcceptingWrites() bool {
-	c.acceptingWritesMutex.RLock()
-	defer c.acceptingWritesMutex.RUnlock()
-	return c.acceptingWrites
+func (c *Conn) submitWrite(b []byte) bool {
+	c.writeMutex.RLock()
+	defer c.writeMutex.RUnlock()
+	if c.doneWriting {
+		return false
+	} else {
+		c.writeRequestsCh <- b
+		return true
+	}
 }
 
-func (c *Conn) stopAcceptingWrites() {
-	c.acceptingWritesMutex.Lock()
-	defer c.acceptingWritesMutex.Unlock()
-	c.acceptingWrites = false
+func (c *Conn) submitRead(b []byte) bool {
+	c.readMutex.RLock()
+	defer c.readMutex.RUnlock()
+	if c.doneReading {
+		return false
+	} else {
+		c.readRequestsCh <- b
+		return true
+	}
 }
 
-func (c *Conn) isAcceptingReads() bool {
-	c.acceptingReadsMutex.RLock()
-	defer c.acceptingReadsMutex.RUnlock()
-	return c.acceptingReads
-}
-
-func (c *Conn) stopAcceptingReads() {
-	c.acceptingReadsMutex.Lock()
-	defer c.acceptingReadsMutex.Unlock()
-	c.acceptingReads = false
-}
-
-func (c *Conn) isAcceptingRequests() bool {
-	c.acceptingRequestsMutex.RLock()
-	defer c.acceptingRequestsMutex.RUnlock()
-	return c.acceptingRequests
-}
-
-func (c *Conn) stopAcceptingRequests() {
-	c.acceptingRequestsMutex.Lock()
-	defer c.acceptingRequestsMutex.Unlock()
-	c.acceptingRequests = false
+func (c *Conn) submitRequest(body *io.PipeReader) bool {
+	c.requestMutex.RLock()
+	defer c.requestMutex.RUnlock()
+	if c.doneRequesting {
+		return false
+	} else {
+		c.reqOutCh <- body
+		return true
+	}
 }
 
 func BadGateway(w io.Writer, msg string) {
