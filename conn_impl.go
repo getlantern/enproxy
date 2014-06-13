@@ -132,7 +132,6 @@ func (c *Conn) processReads() {
 	// Wait for proxy host from first request
 	proxyHost := <-c.proxyHostCh
 
-	log.Println("Making GET request")
 	resp, err = c.doRequest(proxyConn, bufReader, proxyHost, "GET", nil)
 	if err != nil {
 		log.Printf("Unable to do GET request: %s", err)
@@ -147,7 +146,6 @@ func (c *Conn) processReads() {
 		select {
 		case b := <-c.readRequestsCh:
 			if resp == nil {
-				log.Println("Making another GET request")
 				proxyConn, bufReader, err = c.redialProxyIfNecessary(proxyConn, bufReader)
 				if err != nil {
 					log.Printf("Unable to redial proxy for GETing request: %s", err)
