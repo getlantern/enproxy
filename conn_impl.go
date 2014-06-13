@@ -147,6 +147,7 @@ func (c *Conn) processReads() {
 		select {
 		case b := <-c.readRequestsCh:
 			if resp == nil {
+				log.Println("Sending GET request")
 				if time.Now().Sub(lastDialed) > (10 * time.Second) {
 					lastDialed = time.Now()
 					proxyConn, bufReader, err = c.dialProxy()
@@ -260,6 +261,7 @@ func (c *Conn) processRequests() {
 				}
 			}
 
+			log.Println("Sending POST request")
 			resp, err = c.doRequest(proxyConn, bufReader, proxyHost, "POST", reqBody)
 			if err != nil {
 				log.Printf("Unable to do POST request: %s", err)

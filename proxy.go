@@ -136,6 +136,10 @@ func (p *Proxy) handleGET(resp http.ResponseWriter, req *http.Request, lc *lazyC
 
 	connOut.SetReadDeadline(time.Now().Add(30 * time.Second))
 	_, err := io.Copy(mlw, connOut)
+	if err == nil {
+		// Try an additional read to check for EOF
+		_, err = connOut.Read(emptyBuffer)
+	}
 	if err == io.EOF {
 		lc.hitEOF = true
 	}
