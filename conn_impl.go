@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -104,14 +105,17 @@ func (c *Conn) drainAndCloseChannels() {
 func (c *Conn) postRequests() {
 	// Dial proxy (we do this inside here so that it's on a goroutine and
 	// doesn't block the call to Conn.Start().
-	proxyConn, err := c.Config.DialProxy(c.Addr)
+	proxyConn, bufReader, err := c.dialProxy()
 	if err != nil {
 		log.Printf("Unable to dial proxy: %s", err)
 		c.Close()
 		return
 	}
-	defer proxyConn.Close()
-	bufReader := bufio.NewReader(proxyConn)
+	defer func() {
+		if proxyConn != nil {
+			proxyConn.Close()
+		}
+	}()
 
 	for {
 		req, ok := <-c.nextRequestCh
@@ -120,6 +124,12 @@ func (c *Conn) postRequests() {
 			return
 		}
 
+		proxyConn, bufReader, err = c.redialProxyIfNecessary(proxyConn, bufReader)
+		if err != nil {
+			log.Printf("Unable to redial proxy: %s", err)
+			c.Close()
+			return
+		}
 		c.lastRequestTime = time.Now()
 		// Write request
 		err := req.Write(proxyConn)
@@ -339,6 +349,43 @@ func (c *Conn) readNextResponse() (err error, responseFinished bool) {
 	case c.resp = <-c.nextResponseCh:
 	}
 
+	return
+}
+
+func (c *Conn) dialProxy() (proxyConn net.Conn, bufReader *bufio.Reader, err error) {
+	proxyConn, err = c.Config.DialProxy(c.Addr)
+	if err != nil {
+		err = fmt.Errorf("Unable to dial proxy: %s", err)
+		return
+	}
+	bufReader = bufio.NewReader(proxyConn)
+	return
+}
+
+// redialProxyIfNecessary redials the proxy if the original connection got
+// closed somehow
+func (c *Conn) redialProxyIfNecessary(origProxyConn net.Conn, origBufReader *bufio.Reader) (proxyConn net.Conn, bufReader *bufio.Reader, err error) {
+	// Default to keeping the same connection
+	proxyConn = origProxyConn
+	bufReader = origBufReader
+
+	// Make sure connection is still open and redial if necessary
+	origProxyConn.SetReadDeadline(time.Now())
+	_, err = origBufReader.Peek(1)
+	origProxyConn.SetReadDeadline(time.Time{})
+	if err == io.EOF {
+		log.Println("Redialing proxy")
+		// Close original connection
+		origProxyConn.Close()
+		// Dial again
+		proxyConn, bufReader, err = c.dialProxy()
+		if err != nil {
+			log.Println(err)
+			return
+		}
+	} else {
+		err = nil
+	}
 	return
 }
 
