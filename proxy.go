@@ -112,12 +112,24 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 // handlePOST forwards the data from a POST to the outbound connection
 func (p *Proxy) handlePOST(resp http.ResponseWriter, req *http.Request, connOut net.Conn) {
 	// Pipe request
-	_, err := io.Copy(connOut, req.Body)
-	if err != nil && err != io.EOF {
-		badGateway(resp, fmt.Sprintf("Unable to write to connOut: %s", err))
-		return
+	b := p.bufferPool.Get()
+	for {
+		var n int
+		var readErr, writeErr error
+		n, readErr = req.Body.Read(b)
+		if n > 0 {
+			_, writeErr = connOut.Write(b[:n])
+		}
+		if readErr == nil && writeErr == nil {
+			continue
+		} else if readErr == io.EOF {
+			resp.WriteHeader(200)
+			return
+		} else {
+			badGateway(resp, fmt.Sprintf("Unable to write to connOut: %s, %s", readErr, writeErr))
+			return
+		}
 	}
-	resp.WriteHeader(200)
 }
 
 // handleGET streams the data from the outbound connection to the client as
