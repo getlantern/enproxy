@@ -125,24 +125,65 @@ func (p *Proxy) handleGET(resp http.ResponseWriter, req *http.Request, lc *lazyC
 		return
 	}
 
-	resp.Header().Set("X-Accel-Buffering", "no")
-	resp.WriteHeader(200)
-	mlw := &maxLatencyWriter{
-		dst:     resp,
-		latency: p.FlushInterval,
-		done:    make(chan bool),
-	}
-	go mlw.flushLoop()
-	defer mlw.stop()
+	b := make([]byte, 1024768)
+	first := true
+	start := time.Now()
+	bytesRead := 0
+	for {
+		readDeadline := time.Now().Add(p.FlushInterval)
+		connOut.SetReadDeadline(readDeadline)
 
-	connOut.SetReadDeadline(time.Now().Add(30 * time.Second))
-	_, err := io.Copy(mlw, connOut)
-	if err == nil {
-		// Try an additional read to check for EOF
-		_, err = connOut.Read(emptyBuffer)
-	}
-	if err == io.EOF {
-		lc.hitEOF = true
+		// Read
+		n, readErr := connOut.Read(b)
+		if first {
+			if readErr == io.EOF {
+				// Reached EOF
+				resp.Header().Set(X_HTTPCONN_EOF, "true")
+			}
+			if p.Host != "" {
+				// Always feed this so clients will be guaranteed to reach
+				// this particular proxy even if they originally reached us
+				// through (e.g.) DNS round robin.
+				resp.Header().Set(X_HTTPCONN_PROXY_HOST, p.Host)
+			}
+			// Always respond 200 OK
+			resp.WriteHeader(200)
+			first = false
+		}
+
+		// Write if necessary
+		if n > 0 {
+			_, writeErr := resp.Write(b[:n])
+			if writeErr != nil {
+				log.Printf("Write error: %s", writeErr)
+				connOut.Close()
+				return
+			}
+			bytesRead += n
+		}
+
+		// Inspect readErr to decide whether or not to continue reading
+		if readErr != nil {
+			switch e := readErr.(type) {
+			case net.Error:
+				if e.Timeout() {
+					// This means that we hit our idleInterval, which is okay
+					// If we've read some data, return response to client, but
+					// leave connOut open
+					if bytesRead > 0 {
+						return
+					}
+				}
+			default:
+				lc.hitEOF = true
+				return
+			}
+		}
+
+		if time.Now().Sub(start) > 10*time.Second {
+			// We've spent 10 seconds reading, return so that CloudFlare doesn't
+			// time us out
+		}
 	}
 }
 

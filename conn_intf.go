@@ -17,7 +17,7 @@ const (
 
 var (
 	defaultIdleInterval = 10 * time.Millisecond
-	defaultIdleTimeout  = 70 * time.Second
+	defaultIdleTimeout  = 5 * time.Second
 
 	emptyBuffer = []byte{}
 )
@@ -151,15 +151,15 @@ func (c *Conn) Read(b []byte) (n int, err error) {
 
 // Close() implements the function from net.Conn
 func (c *Conn) Close() error {
-	// c.closedMutex.Lock()
-	// defer c.closedMutex.Unlock()
+	c.closedMutex.Lock()
+	defer c.closedMutex.Unlock()
 	c.closed = true
 	return nil
 }
 
 func (c *Conn) isClosed() bool {
-	// c.closedMutex.RLock()
-	// defer c.closedMutex.RUnlock()
+	c.closedMutex.RLock()
+	defer c.closedMutex.RUnlock()
 	return c.closed
 }
 

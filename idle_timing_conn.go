@@ -96,7 +96,6 @@ func (c *idleTimingConn) markActive() {
 
 func (c *idleTimingConn) closeIfNecessary() bool {
 	if time.Now().Sub(c.lastActivityTime) > c.idleTimeout {
-		log.Println("Closing idle connection")
 		c.Close()
 		return true
 	}
