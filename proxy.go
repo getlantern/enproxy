@@ -16,7 +16,7 @@ const (
 )
 
 var (
-	defaultFlushInterval = 15 * time.Millisecond
+	defaultFlushInterval = 100 * time.Millisecond
 )
 
 // Proxy is the server side to an enproxy.Client.  Proxy implements the

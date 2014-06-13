@@ -54,8 +54,8 @@ func (c *Conn) makeChannels() {
 
 func (c *Conn) processWrites() {
 	defer func() {
-		c.writeMutex.Lock()
-		defer c.writeMutex.Unlock()
+		// c.writeMutex.Lock()
+		// defer c.writeMutex.Unlock()
 		for {
 			select {
 			case <-c.writeRequestsCh:
@@ -102,8 +102,8 @@ func (c *Conn) processReads() {
 	var err error
 
 	defer func() {
-		c.readMutex.Lock()
-		defer c.readMutex.Unlock()
+		// c.readMutex.Lock()
+		// defer c.readMutex.Unlock()
 		for {
 			select {
 			case <-c.readRequestsCh:
@@ -132,8 +132,10 @@ func (c *Conn) processReads() {
 	// Wait for proxy host from first request
 	proxyHost := <-c.proxyHostCh
 
+	log.Println("Making read request")
 	resp, err = c.doRequest(proxyConn, bufReader, proxyHost, "GET", nil)
 	if err != nil {
+		log.Printf("Unable to do GET request: %s", err)
 		return
 	}
 
@@ -145,8 +147,16 @@ func (c *Conn) processReads() {
 		select {
 		case b := <-c.readRequestsCh:
 			if resp == nil {
+				log.Println("Making read request")
+				proxyConn, bufReader, err = c.redialProxyIfNecessary(proxyConn, bufReader)
+				if err != nil {
+					log.Printf("Unable to redial proxy for GETing request: %s", err)
+					return
+				}
+
 				resp, err = c.doRequest(proxyConn, bufReader, proxyHost, "GET", nil)
 				if err != nil {
+					log.Printf("Unable to do GET request: %s", err)
 					return
 				}
 			}
@@ -197,8 +207,8 @@ func (c *Conn) processRequests() {
 	var err error
 
 	defer func() {
-		c.requestMutex.Lock()
-		defer c.requestMutex.Unlock()
+		// c.requestMutex.Lock()
+		// defer c.requestMutex.Unlock()
 		for {
 			select {
 			case <-c.reqOutCh:
@@ -238,8 +248,15 @@ func (c *Conn) processRequests() {
 				return
 			}
 
+			proxyConn, bufReader, err = c.redialProxyIfNecessary(proxyConn, bufReader)
+			if err != nil {
+				log.Printf("Unable to redial proxy for POSTing request: %s", err)
+				return
+			}
+
 			resp, err = c.doRequest(proxyConn, bufReader, proxyHost, "POST", reqBody)
 			if err != nil {
+				log.Printf("Unable to do POST request: %s", err)
 				return
 			}
 
@@ -360,8 +377,8 @@ func (c *Conn) buildRequest(host string, method string, requestBody io.ReadClose
 }
 
 func (c *Conn) markActive() {
-	c.lastActivityMutex.Lock()
-	defer c.lastActivityMutex.Unlock()
+	// c.lastActivityMutex.Lock()
+	// defer c.lastActivityMutex.Unlock()
 	c.lastActivityTime = time.Now()
 }
 
