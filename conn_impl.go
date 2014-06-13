@@ -331,14 +331,10 @@ func (c *Conn) redialProxyIfNecessary(origProxyConn net.Conn, origBufReader *buf
 }
 
 func (c *Conn) doRequest(proxyConn net.Conn, bufReader *bufio.Reader, host string, method string, body io.ReadCloser) (resp *http.Response, err error) {
-	req, err := c.buildRequest(host, "POST", body)
+	req, err := c.buildRequest(host, method, body)
 	if err != nil {
 		err = fmt.Errorf("Unable to construct request to proxy: %s", err)
 		return
-	}
-
-	if method == "GET" {
-		req.Header.Set(X_HTTPCONN_POLL, "true")
 	}
 
 	err = req.Write(proxyConn)

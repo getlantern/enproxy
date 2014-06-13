@@ -16,7 +16,7 @@ const (
 )
 
 var (
-	defaultFlushInterval = 35 * time.Millisecond
+	defaultFlushInterval = 50 * time.Millisecond
 )
 
 // Proxy is the server side to an enproxy.Client.  Proxy implements the
@@ -95,10 +95,12 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if req.Header.Get(X_HTTPCONN_POLL) == "true" {
+	if req.Method == "POST" {
+		p.handlePOST(resp, req, connOut)
+	} else if req.Method == "GET" {
 		p.handleGET(resp, req, lc, connOut)
 	} else {
-		p.handlePOST(resp, req, connOut)
+		badGateway(resp, fmt.Sprintf("Method %s not supported", req.Method))
 	}
 }
 
@@ -123,6 +125,7 @@ func (p *Proxy) handleGET(resp http.ResponseWriter, req *http.Request, lc *lazyC
 		return
 	}
 
+	resp.Header().Set("X-Accel-Buffering", "no")
 	resp.WriteHeader(200)
 	mlw := &maxLatencyWriter{
 		dst:     resp,
