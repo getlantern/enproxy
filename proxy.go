@@ -95,12 +95,10 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if req.Method == "POST" {
-		p.handlePOST(resp, req, connOut)
-	} else if req.Method == "GET" {
+	if req.Header.Get(X_HTTPCONN_POLL) == "true" {
 		p.handleGET(resp, req, lc, connOut)
 	} else {
-		badGateway(resp, fmt.Sprintf("Method %s not supported", req.Method))
+		p.handlePOST(resp, req, connOut)
 	}
 }
 

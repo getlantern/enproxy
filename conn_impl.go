@@ -132,6 +132,7 @@ func (c *Conn) processReads() {
 	// Wait for proxy host from first request
 	proxyHost := <-c.proxyHostCh
 
+	log.Println("Making GET request")
 	resp, err = c.doRequest(proxyConn, bufReader, proxyHost, "GET", nil)
 	if err != nil {
 		log.Printf("Unable to do GET request: %s", err)
@@ -146,6 +147,7 @@ func (c *Conn) processReads() {
 		select {
 		case b := <-c.readRequestsCh:
 			if resp == nil {
+				log.Println("Making another GET request")
 				proxyConn, bufReader, err = c.redialProxyIfNecessary(proxyConn, bufReader)
 				if err != nil {
 					log.Printf("Unable to redial proxy for GETing request: %s", err)
@@ -331,10 +333,14 @@ func (c *Conn) redialProxyIfNecessary(origProxyConn net.Conn, origBufReader *buf
 }
 
 func (c *Conn) doRequest(proxyConn net.Conn, bufReader *bufio.Reader, host string, method string, body io.ReadCloser) (resp *http.Response, err error) {
-	req, err := c.buildRequest(host, method, body)
+	req, err := c.buildRequest(host, "POST", body)
 	if err != nil {
 		err = fmt.Errorf("Unable to construct request to proxy: %s", err)
 		return
+	}
+
+	if method == "GET" {
+		req.Header.Set(X_HTTPCONN_POLL, "true")
 	}
 
 	err = req.Write(proxyConn)
