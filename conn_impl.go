@@ -132,6 +132,7 @@ func (c *Conn) processReads() {
 	// Wait for proxy host from first request
 	proxyHost := <-c.proxyHostCh
 
+	log.Println("Making read request")
 	resp, err = c.doRequest(proxyConn, bufReader, proxyHost, "GET", nil)
 	if err != nil {
 		log.Printf("Unable to do GET request: %s", err)
@@ -146,6 +147,7 @@ func (c *Conn) processReads() {
 		select {
 		case b := <-c.readRequestsCh:
 			if resp == nil {
+				log.Println("Making another read request")
 				proxyConn, bufReader, err = c.redialProxyIfNecessary(proxyConn, bufReader)
 				if err != nil {
 					log.Printf("Unable to redial proxy for GETing request: %s", err)
@@ -159,15 +161,29 @@ func (c *Conn) processReads() {
 				}
 			}
 
+			if resp.Header.Get(X_HTTPCONN_EOF) == "true" {
+				c.readResponsesCh <- rwResponse{0, io.EOF}
+				return
+			}
+
 			// Read
 			n, err := resp.Body.Read(b)
 			if n > 0 {
 				c.markActive()
 			}
 
-			c.readResponsesCh <- rwResponse{n, err}
+			errToClient := err
+			if err == io.EOF {
+				// Don't propagate EOF to client
+				errToClient = nil
+			}
+			c.readResponsesCh <- rwResponse{n, errToClient}
 			if err != nil {
-				if err != io.EOF {
+				if err == io.EOF {
+					resp.Body.Close()
+					resp = nil
+					continue
+				} else {
 					log.Printf("Unexpected error reading from proxyConn: %s", err)
 				}
 				return
