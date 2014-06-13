@@ -16,7 +16,7 @@ const (
 )
 
 var (
-	defaultIdleInterval = 35 * time.Millisecond
+	defaultIdleInterval = 15 * time.Millisecond
 	defaultIdleTimeout  = 70 * time.Second
 
 	emptyBuffer = []byte{}
