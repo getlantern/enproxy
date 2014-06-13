@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/oxtoacart/bpool"
 )
 
 const (
@@ -43,6 +45,8 @@ type Proxy struct {
 	connMap map[string]*lazyConn // map of outbound connections by their id
 
 	connMapMutex sync.Mutex // mutex for controlling access to connMap
+
+	bufferPool *bpool.BytePool
 }
 
 // Start() starts this proxy
@@ -59,6 +63,7 @@ func (p *Proxy) Start() {
 		p.IdleTimeout = defaultIdleTimeout
 	}
 	p.connMap = make(map[string]*lazyConn)
+	p.bufferPool = bpool.NewBytePool(1000, 1024768)
 }
 
 // ListenAndServe: convenience function for quickly starting up a dedicated HTTP
@@ -125,7 +130,8 @@ func (p *Proxy) handleGET(resp http.ResponseWriter, req *http.Request, lc *lazyC
 		return
 	}
 
-	b := make([]byte, 1024768)
+	// TODO: Put these in a pool
+	b := p.bufferPool.Get()
 	first := true
 	start := time.Now()
 	bytesRead := 0

@@ -45,23 +45,23 @@ func (c *Conn) initDefaults() {
 // and close requests on this connection.
 func (c *Conn) makeChannels() {
 	c.proxyHostCh = make(chan string)
-	c.writeRequestsCh = make(chan []byte)
-	c.writeResponsesCh = make(chan rwResponse)
-	c.readRequestsCh = make(chan []byte)
-	c.readResponsesCh = make(chan rwResponse)
-	c.reqOutCh = make(chan *io.PipeReader)
+	c.writeRequestsCh = make(chan []byte, 100)
+	c.writeResponsesCh = make(chan rwResponse, 100)
+	c.readRequestsCh = make(chan []byte, 100)
+	c.readResponsesCh = make(chan rwResponse, 100)
+	c.reqOutCh = make(chan *io.PipeReader, 100)
 }
 
 func (c *Conn) processWrites() {
 	defer func() {
 		c.writeMutex.Lock()
-		defer c.writeMutex.Unlock()
+		c.doneWriting = true
+		c.writeMutex.Unlock()
 		for {
 			select {
 			case <-c.writeRequestsCh:
 				c.writeResponsesCh <- rwResponse{0, io.EOF}
 			default:
-				c.doneWriting = true
 				close(c.writeRequestsCh)
 				return
 			}
@@ -82,6 +82,10 @@ func (c *Conn) processWrites() {
 				c.markActive()
 			}
 		case <-time.After(c.Config.IdleInterval):
+			if c.isIdle() {
+				// Connection is idle, stop writing
+				return
+			}
 			// We waited more than PollInterval for a write, close our request
 			// body writer so that it can get flushed to the server
 			if c.reqBodyWriter != nil {
@@ -96,24 +100,18 @@ func (c *Conn) processWrites() {
 // our encapsulated HTTP request, or we've hit our idle interval and still
 // haven't received a read request.
 func (c *Conn) processReads() {
-	var proxyConn net.Conn
-	var bufReader *bufio.Reader
 	var resp *http.Response
-	var err error
 
 	defer func() {
 		c.readMutex.Lock()
-		defer c.readMutex.Unlock()
+		c.doneReading = true
+		c.readMutex.Unlock()
 		for {
 			select {
 			case <-c.readRequestsCh:
 				c.readResponsesCh <- rwResponse{0, io.EOF}
 			default:
-				c.doneReading = true
 				close(c.readRequestsCh)
-				if proxyConn != nil {
-					proxyConn.Close()
-				}
 				if resp != nil {
 					resp.Body.Close()
 				}
@@ -123,11 +121,12 @@ func (c *Conn) processReads() {
 	}()
 
 	// Dial proxy
-	proxyConn, bufReader, err = c.dialProxy()
+	proxyConn, bufReader, err := c.dialProxy()
 	if err != nil {
 		log.Printf("Unable to dial proxy to GET data: %s", err)
 		return
 	}
+	defer proxyConn.Close()
 
 	// Wait for proxy host from first request
 	proxyHost := <-c.proxyHostCh
@@ -145,12 +144,6 @@ func (c *Conn) processReads() {
 		select {
 		case b := <-c.readRequestsCh:
 			if resp == nil {
-				// proxyConn, bufReader, err = c.redialProxyIfNecessary(proxyConn, bufReader)
-				// if err != nil {
-				// 	log.Printf("Unable to redial proxy for GETing request: %s", err)
-				// 	return
-				// }
-
 				resp, err = c.doRequest(proxyConn, bufReader, proxyHost, "GET", nil)
 				if err != nil {
 					return
@@ -163,6 +156,7 @@ func (c *Conn) processReads() {
 			}
 
 			// Read
+			proxyConn.SetReadDeadline(time.Now().Add(c.Config.IdleTimeout))
 			n, err := resp.Body.Read(b)
 			if n > 0 {
 				c.markActive()
@@ -185,7 +179,9 @@ func (c *Conn) processReads() {
 				return
 			}
 		case <-time.After(c.Config.IdleTimeout):
-			// Haven't read within our idle timeout, continue loop
+			if c.isIdle() {
+				return
+			}
 		}
 	}
 	return
@@ -197,23 +193,17 @@ func (c *Conn) processReads() {
 // required because we are encapsulating a stream of data inside the bodies of
 // successive requests.
 func (c *Conn) processRequests() {
-	var proxyConn net.Conn
-	var bufReader *bufio.Reader
 	var resp *http.Response
-	var err error
 
 	defer func() {
 		c.requestMutex.Lock()
-		defer c.requestMutex.Unlock()
+		c.doneRequesting = true
+		c.requestMutex.Unlock()
 		for {
 			select {
 			case <-c.reqOutCh:
 			default:
-				c.doneRequesting = true
 				close(c.reqOutCh)
-				if proxyConn != nil {
-					proxyConn.Close()
-				}
 				if resp != nil {
 					resp.Body.Close()
 				}
@@ -223,11 +213,12 @@ func (c *Conn) processRequests() {
 	}()
 
 	// Dial proxy
-	proxyConn, bufReader, err = c.dialProxy()
+	proxyConn, bufReader, err := c.dialProxy()
 	if err != nil {
 		log.Printf("Unable to dial proxy for POSTing request: %s", err)
 		return
 	}
+	defer proxyConn.Close()
 
 	var proxyHost string
 	first := true
@@ -244,12 +235,6 @@ func (c *Conn) processRequests() {
 				return
 			}
 
-			// proxyConn, bufReader, err = c.redialProxyIfNecessary(proxyConn, bufReader)
-			// if err != nil {
-			// 	log.Printf("Unable to redial proxy for POSTing request: %s", err)
-			// 	return
-			// }
-
 			resp, err = c.doRequest(proxyConn, bufReader, proxyHost, "POST", reqBody)
 			if err != nil {
 				return
@@ -262,7 +247,9 @@ func (c *Conn) processRequests() {
 				first = false
 			}
 		case <-time.After(c.Config.IdleTimeout):
-			// Hit idle timeout without getting a new request, continue loop
+			if c.isIdle() {
+				return
+			}
 		}
 	}
 }
@@ -302,31 +289,6 @@ func (c *Conn) dialProxy() (proxyConn net.Conn, bufReader *bufio.Reader, err err
 	return
 }
 
-func (c *Conn) redialProxyIfNecessary(origProxyConn net.Conn, origBufReader *bufio.Reader) (proxyConn net.Conn, bufReader *bufio.Reader, err error) {
-	// Default to keeping the same connection
-	proxyConn = origProxyConn
-	bufReader = origBufReader
-
-	// Make sure connection is still open and redial if necessary
-	origProxyConn.SetReadDeadline(time.Now())
-	_, err = origBufReader.Peek(1)
-	origProxyConn.SetReadDeadline(time.Time{})
-	if err == io.EOF {
-		log.Println("Redialing proxy")
-		// Close original connection
-		origProxyConn.Close()
-		// Dial again
-		proxyConn, bufReader, err = c.dialProxy()
-		if err != nil {
-			log.Println(err)
-			return
-		}
-	} else {
-		err = nil
-	}
-	return
-}
-
 func (c *Conn) doRequest(proxyConn net.Conn, bufReader *bufio.Reader, host string, method string, body io.ReadCloser) (resp *http.Response, err error) {
 	req, err := c.buildRequest(host, method, body)
 	if err != nil {
@@ -334,12 +296,14 @@ func (c *Conn) doRequest(proxyConn net.Conn, bufReader *bufio.Reader, host strin
 		return
 	}
 
+	proxyConn.SetWriteDeadline(time.Now().Add(c.Config.IdleTimeout))
 	err = req.Write(proxyConn)
 	if err != nil {
 		err = fmt.Errorf("Error sending request to proxy: %s", err)
 		return
 	}
 
+	proxyConn.SetReadDeadline(time.Now().Add(c.Config.IdleTimeout))
 	resp, err = http.ReadResponse(bufReader, req)
 	if err != nil {
 		err = fmt.Errorf("Error reading response from proxy: %s", err)
