@@ -2,7 +2,6 @@ package enproxy
 
 import (
 	"bufio"
-	"bytes"
 	"fmt"
 	"io"
 	"log"
@@ -124,9 +123,10 @@ func (c *Conn) processReads() {
 	}()
 
 	// Dial proxy
+	lastDialed := time.Now()
 	proxyConn, bufReader, err = c.dialProxy()
 	if err != nil {
-		log.Println(err)
+		log.Printf("Unable to dial proxy to GET data: %s", err)
 		return
 	}
 
@@ -135,7 +135,7 @@ func (c *Conn) processReads() {
 
 	resp, err = c.doRequest(proxyConn, bufReader, proxyHost, "GET", nil)
 	if err != nil {
-		log.Printf("Unable to dial proxy for GETing response: %s", err)
+		log.Printf("Unable to do GET request: %s", err)
 		return
 	}
 
@@ -146,12 +146,14 @@ func (c *Conn) processReads() {
 
 		select {
 		case b := <-c.readRequestsCh:
-			// Make new request if necessary
 			if resp == nil {
-				proxyConn, bufReader, err = c.redialProxyIfNecessary(proxyConn, bufReader)
-				if err != nil {
-					log.Printf("Unable to redial proxy for GETing response: %s", err)
-					return
+				if time.Now().Sub(lastDialed) > (10 * time.Second) {
+					lastDialed = time.Now()
+					proxyConn, bufReader, err = c.dialProxy()
+					if err != nil {
+						log.Printf("Unable to redial proxy for POSTing request: %s", err)
+						return
+					}
 				}
 
 				resp, err = c.doRequest(proxyConn, bufReader, proxyHost, "GET", nil)
@@ -159,6 +161,11 @@ func (c *Conn) processReads() {
 					log.Printf("Unable to do GET request: %s", err)
 					return
 				}
+			}
+
+			if resp.Header.Get(X_HTTPCONN_EOF) == "true" {
+				c.readResponsesCh <- rwResponse{0, io.EOF}
+				return
 			}
 
 			// Read
@@ -175,9 +182,9 @@ func (c *Conn) processReads() {
 			c.readResponsesCh <- rwResponse{n, errToClient}
 			if err != nil {
 				if err == io.EOF {
-					// Finish old response
 					resp.Body.Close()
 					resp = nil
+					continue
 				} else {
 					log.Printf("Unexpected error reading from proxyConn: %s", err)
 				}
@@ -221,6 +228,7 @@ func (c *Conn) processRequests() {
 		}
 	}()
 
+	lastDialed := time.Now()
 	// Dial proxy
 	proxyConn, bufReader, err = c.dialProxy()
 	if err != nil {
@@ -243,10 +251,13 @@ func (c *Conn) processRequests() {
 				return
 			}
 
-			proxyConn, bufReader, err = c.redialProxyIfNecessary(proxyConn, bufReader)
-			if err != nil {
-				log.Printf("Unable to redial proxy for POSTing request: %s", err)
-				return
+			if time.Now().Sub(lastDialed) > (10 * time.Second) {
+				lastDialed = time.Now()
+				proxyConn, bufReader, err = c.dialProxy()
+				if err != nil {
+					log.Printf("Unable to redial proxy for POSTing request: %s", err)
+					return
+				}
 			}
 
 			resp, err = c.doRequest(proxyConn, bufReader, proxyHost, "POST", reqBody)
@@ -349,9 +360,7 @@ func (c *Conn) doRequest(proxyConn net.Conn, bufReader *bufio.Reader, host strin
 	// Check response status
 	responseOK := resp.StatusCode >= 200 && resp.StatusCode < 300
 	if !responseOK {
-		respText := bytes.NewBuffer(nil)
-		resp.Write(respText)
-		err = fmt.Errorf("Bad response status for read: %d\n%s\n", resp.StatusCode, string(respText.Bytes()))
+		err = fmt.Errorf("Bad response status for read: %s", resp.Status)
 		resp.Body.Close()
 		resp = nil
 	}

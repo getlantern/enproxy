@@ -16,7 +16,7 @@ const (
 )
 
 var (
-	defaultFlushInterval = 35 * time.Millisecond
+	defaultFlushInterval = 15 * time.Millisecond
 )
 
 // Proxy is the server side to an enproxy.Client.  Proxy implements the
@@ -98,7 +98,7 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	if req.Method == "POST" {
 		p.handlePOST(resp, req, connOut)
 	} else if req.Method == "GET" {
-		p.handleGET(resp, req, connOut)
+		p.handleGET(resp, req, lc, connOut)
 	} else {
 		badGateway(resp, fmt.Sprintf("Method %s not supported", req.Method))
 	}
@@ -116,8 +116,15 @@ func (p *Proxy) handlePOST(resp http.ResponseWriter, req *http.Request, connOut 
 }
 
 // handleGET streams the data from the outbound connection to the client as
-// a response body.
-func (p *Proxy) handleGET(resp http.ResponseWriter, req *http.Request, connOut net.Conn) {
+// a response body.  If no data is read for more than FlushInterval, then the
+// response is finished and client needs to make a new GET request.
+func (p *Proxy) handleGET(resp http.ResponseWriter, req *http.Request, lc *lazyConn, connOut net.Conn) {
+	if lc.hitEOF {
+		resp.Header().Set(X_HTTPCONN_EOF, "true")
+		resp.WriteHeader(200)
+		return
+	}
+
 	resp.WriteHeader(200)
 	mlw := &maxLatencyWriter{
 		dst:     resp,
@@ -126,7 +133,12 @@ func (p *Proxy) handleGET(resp http.ResponseWriter, req *http.Request, connOut n
 	}
 	go mlw.flushLoop()
 	defer mlw.stop()
-	io.Copy(mlw, connOut)
+
+	connOut.SetReadDeadline(time.Now().Add(30 * time.Second))
+	_, err := io.Copy(mlw, connOut)
+	if err == io.EOF {
+		lc.hitEOF = true
+	}
 }
 
 // getLazyConn gets the lazyConn corresponding to the given id and addr
@@ -143,7 +155,6 @@ func (p *Proxy) getLazyConn(id string, addr string) (l *lazyConn) {
 
 func badGateway(resp http.ResponseWriter, msg string) {
 	log.Printf("Responding bad gateway: %s", msg)
-	resp.Header().Set("Connection", "close")
 	resp.WriteHeader(BAD_GATEWAY)
 }
 
