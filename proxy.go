@@ -8,8 +8,6 @@ import (
 	"net/http"
 	"sync"
 	"time"
-
-	"github.com/oxtoacart/bpool"
 )
 
 const (
@@ -45,8 +43,6 @@ type Proxy struct {
 	connMap map[string]*lazyConn // map of outbound connections by their id
 
 	connMapMutex sync.Mutex // mutex for controlling access to connMap
-
-	bufferPool *bpool.BytePool
 }
 
 // Start() starts this proxy
@@ -63,7 +59,6 @@ func (p *Proxy) Start() {
 		p.IdleTimeout = defaultIdleTimeout
 	}
 	p.connMap = make(map[string]*lazyConn)
-	p.bufferPool = bpool.NewBytePool(1000, 1024768)
 }
 
 // ListenAndServe: convenience function for quickly starting up a dedicated HTTP
@@ -112,24 +107,12 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 // handlePOST forwards the data from a POST to the outbound connection
 func (p *Proxy) handlePOST(resp http.ResponseWriter, req *http.Request, connOut net.Conn) {
 	// Pipe request
-	b := p.bufferPool.Get()
-	for {
-		var n int
-		var readErr, writeErr error
-		n, readErr = req.Body.Read(b)
-		if n > 0 {
-			_, writeErr = connOut.Write(b[:n])
-		}
-		if readErr == nil && writeErr == nil {
-			continue
-		} else if readErr == io.EOF {
-			resp.WriteHeader(200)
-			return
-		} else {
-			badGateway(resp, fmt.Sprintf("Unable to write to connOut: %s, %s", readErr, writeErr))
-			return
-		}
+	_, err := io.Copy(connOut, req.Body)
+	if err != nil && err != io.EOF {
+		badGateway(resp, fmt.Sprintf("Unable to write to connOut: %s", err))
+		return
 	}
+	resp.WriteHeader(200)
 }
 
 // handleGET streams the data from the outbound connection to the client as
@@ -142,11 +125,11 @@ func (p *Proxy) handleGET(resp http.ResponseWriter, req *http.Request, lc *lazyC
 		return
 	}
 
-	// TODO: Put these in a pool
-	b := p.bufferPool.Get()
+	b := make([]byte, 64000)
 	first := true
 	start := time.Now()
 	bytesRead := 0
+	bytesInBatch := 0
 	for {
 		readDeadline := time.Now().Add(p.FlushInterval)
 		connOut.SetReadDeadline(readDeadline)
@@ -178,6 +161,7 @@ func (p *Proxy) handleGET(resp http.ResponseWriter, req *http.Request, lc *lazyC
 				return
 			}
 			bytesRead += n
+			bytesInBatch += n
 		}
 
 		// Inspect readErr to decide whether or not to continue reading
@@ -201,6 +185,12 @@ func (p *Proxy) handleGET(resp http.ResponseWriter, req *http.Request, lc *lazyC
 		if time.Now().Sub(start) > 10*time.Second {
 			// We've spent 10 seconds reading, return so that CloudFlare doesn't
 			// time us out
+			return
+		}
+
+		if bytesInBatch > 1024768 {
+			resp.(http.Flusher).Flush()
+			bytesInBatch = 0
 		}
 	}
 }
