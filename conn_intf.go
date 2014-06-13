@@ -2,7 +2,6 @@ package enproxy
 
 import (
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -12,14 +11,12 @@ import (
 const (
 	X_HTTPCONN_ID         = "X-HTTPConn-Id"
 	X_HTTPCONN_DEST_ADDR  = "X-HTTPConn-Dest-Addr"
-	X_HTTPCONN_EOF        = "X-HTTPConn-EOF"
 	X_HTTPCONN_PROXY_HOST = "X-HTTPConn-Proxy-Host"
-	X_HTTPCONN_POLL       = "X-HTTPConn-Poll"
 )
 
 var (
 	defaultIdleInterval = 10 * time.Millisecond
-	defaultIdleTimeout  = 5 * time.Second
+	defaultIdleTimeout  = 70 * time.Second
 
 	emptyBuffer = []byte{}
 )
@@ -153,7 +150,6 @@ func (c *Conn) Read(b []byte) (n int, err error) {
 
 // Close() implements the function from net.Conn
 func (c *Conn) Close() error {
-	log.Println("Close called")
 	c.closedMutex.Lock()
 	defer c.closedMutex.Unlock()
 	c.closed = true
