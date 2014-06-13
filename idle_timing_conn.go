@@ -1,7 +1,6 @@
 package enproxy
 
 import (
-	"log"
 	"net"
 	"time"
 )
