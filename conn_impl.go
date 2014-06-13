@@ -54,9 +54,9 @@ func (c *Conn) makeChannels() {
 
 func (c *Conn) processWrites() {
 	defer func() {
+		c.writeMutex.Lock()
+		defer c.writeMutex.Unlock()
 		for {
-			c.writeMutex.Lock()
-			defer c.writeMutex.Unlock()
 			select {
 			case <-c.writeRequestsCh:
 				c.writeResponsesCh <- rwResponse{0, io.EOF}
@@ -102,9 +102,9 @@ func (c *Conn) processReads() {
 	var err error
 
 	defer func() {
+		c.readMutex.Lock()
+		defer c.readMutex.Unlock()
 		for {
-			c.readMutex.Lock()
-			defer c.readMutex.Unlock()
 			select {
 			case <-c.readRequestsCh:
 				c.readResponsesCh <- rwResponse{0, io.EOF}
@@ -132,7 +132,6 @@ func (c *Conn) processReads() {
 	// Wait for proxy host from first request
 	proxyHost := <-c.proxyHostCh
 
-	log.Println("Making read request")
 	resp, err = c.doRequest(proxyConn, bufReader, proxyHost, "GET", nil)
 	if err != nil {
 		log.Printf("Unable to do GET request: %s", err)
@@ -147,13 +146,6 @@ func (c *Conn) processReads() {
 		select {
 		case b := <-c.readRequestsCh:
 			if resp == nil {
-				log.Println("Making another read request")
-				proxyConn, bufReader, err = c.redialProxyIfNecessary(proxyConn, bufReader)
-				if err != nil {
-					log.Printf("Unable to redial proxy for GETing request: %s", err)
-					return
-				}
-
 				resp, err = c.doRequest(proxyConn, bufReader, proxyHost, "GET", nil)
 				if err != nil {
 					log.Printf("Unable to do GET request: %s", err)
@@ -207,9 +199,9 @@ func (c *Conn) processRequests() {
 	var err error
 
 	defer func() {
+		c.requestMutex.Lock()
+		defer c.requestMutex.Unlock()
 		for {
-			c.requestMutex.Lock()
-			defer c.requestMutex.Unlock()
 			select {
 			case <-c.reqOutCh:
 			default:
@@ -245,12 +237,6 @@ func (c *Conn) processRequests() {
 		case reqBody, ok := <-c.reqOutCh:
 			if !ok {
 				// done processing requests
-				return
-			}
-
-			proxyConn, bufReader, err = c.redialProxyIfNecessary(proxyConn, bufReader)
-			if err != nil {
-				log.Printf("Unable to redial proxy for POSTing request: %s", err)
 				return
 			}
 
@@ -391,10 +377,11 @@ func (c *Conn) isIdle() bool {
 
 func (c *Conn) submitWrite(b []byte) bool {
 	c.writeMutex.RLock()
-	defer c.writeMutex.RUnlock()
 	if c.doneWriting {
+		c.writeMutex.RUnlock()
 		return false
 	} else {
+		c.writeMutex.RUnlock()
 		c.writeRequestsCh <- b
 		return true
 	}
@@ -402,10 +389,11 @@ func (c *Conn) submitWrite(b []byte) bool {
 
 func (c *Conn) submitRead(b []byte) bool {
 	c.readMutex.RLock()
-	defer c.readMutex.RUnlock()
 	if c.doneReading {
+		c.readMutex.RUnlock()
 		return false
 	} else {
+		c.readMutex.RUnlock()
 		c.readRequestsCh <- b
 		return true
 	}
@@ -413,10 +401,11 @@ func (c *Conn) submitRead(b []byte) bool {
 
 func (c *Conn) submitRequest(body *io.PipeReader) bool {
 	c.requestMutex.RLock()
-	defer c.requestMutex.RUnlock()
 	if c.doneRequesting {
+		c.requestMutex.RUnlock()
 		return false
 	} else {
+		c.requestMutex.RUnlock()
 		c.reqOutCh <- body
 		return true
 	}

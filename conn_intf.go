@@ -2,6 +2,7 @@ package enproxy
 
 import (
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -18,7 +19,7 @@ const (
 
 var (
 	defaultIdleInterval = 10 * time.Millisecond
-	defaultIdleTimeout  = 70 * time.Second
+	defaultIdleTimeout  = 5 * time.Second
 
 	emptyBuffer = []byte{}
 )
@@ -152,6 +153,7 @@ func (c *Conn) Read(b []byte) (n int, err error) {
 
 // Close() implements the function from net.Conn
 func (c *Conn) Close() error {
+	log.Println("Close called")
 	c.closedMutex.Lock()
 	defer c.closedMutex.Unlock()
 	c.closed = true
