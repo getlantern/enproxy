@@ -123,7 +123,6 @@ func (c *Conn) processReads() {
 	}()
 
 	// Dial proxy
-	lastDialed := time.Now()
 	proxyConn, bufReader, err = c.dialProxy()
 	if err != nil {
 		log.Printf("Unable to dial proxy to GET data: %s", err)
@@ -147,14 +146,10 @@ func (c *Conn) processReads() {
 		select {
 		case b := <-c.readRequestsCh:
 			if resp == nil {
-				log.Println("Sending GET request")
-				if time.Now().Sub(lastDialed) > (10 * time.Second) {
-					lastDialed = time.Now()
-					proxyConn, bufReader, err = c.dialProxy()
-					if err != nil {
-						log.Printf("Unable to redial proxy for POSTing request: %s", err)
-						return
-					}
+				proxyConn, bufReader, err = c.redialProxyIfNecessary(proxyConn, bufReader)
+				if err != nil {
+					log.Printf("Unable to redial proxy for GETing request: %s", err)
+					return
 				}
 
 				resp, err = c.doRequest(proxyConn, bufReader, proxyHost, "GET", nil)
@@ -229,7 +224,6 @@ func (c *Conn) processRequests() {
 		}
 	}()
 
-	lastDialed := time.Now()
 	// Dial proxy
 	proxyConn, bufReader, err = c.dialProxy()
 	if err != nil {
@@ -252,16 +246,12 @@ func (c *Conn) processRequests() {
 				return
 			}
 
-			if time.Now().Sub(lastDialed) > (10 * time.Second) {
-				lastDialed = time.Now()
-				proxyConn, bufReader, err = c.dialProxy()
-				if err != nil {
-					log.Printf("Unable to redial proxy for POSTing request: %s", err)
-					return
-				}
+			proxyConn, bufReader, err = c.redialProxyIfNecessary(proxyConn, bufReader)
+			if err != nil {
+				log.Printf("Unable to redial proxy for POSTing request: %s", err)
+				return
 			}
 
-			log.Println("Sending POST request")
 			resp, err = c.doRequest(proxyConn, bufReader, proxyHost, "POST", reqBody)
 			if err != nil {
 				log.Printf("Unable to do POST request: %s", err)
