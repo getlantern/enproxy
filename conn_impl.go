@@ -159,29 +159,15 @@ func (c *Conn) processReads() {
 				}
 			}
 
-			if resp.Header.Get(X_HTTPCONN_EOF) == "true" {
-				c.readResponsesCh <- rwResponse{0, io.EOF}
-				return
-			}
-
 			// Read
 			n, err := resp.Body.Read(b)
 			if n > 0 {
 				c.markActive()
 			}
 
-			errToClient := err
-			if err == io.EOF {
-				// Don't propagate EOF to client
-				errToClient = nil
-			}
-			c.readResponsesCh <- rwResponse{n, errToClient}
+			c.readResponsesCh <- rwResponse{n, err}
 			if err != nil {
-				if err == io.EOF {
-					resp.Body.Close()
-					resp = nil
-					continue
-				} else {
+				if err != io.EOF {
 					log.Printf("Unexpected error reading from proxyConn: %s", err)
 				}
 				return
