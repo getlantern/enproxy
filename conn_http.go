@@ -63,14 +63,10 @@ func pipeData(clientConn net.Conn, buffClientConn *bufio.ReadWriter, connOut *Co
 			return
 		}
 		_, err = io.Copy(connOut, buffClientConn)
-		if err == nil {
-			// A nil error here means that we reached EOF on the clientConn,
-			// which means that it is closed.  We can immediately close connOut,
-			// which otherwise might hang around until it hits its IdleTimeout.
-			// Doing this aggressively helps keep CPU usage due to idling
-			// connections down.
-			connOut.Close()
-		}
+		// We immediately close connOut, which otherwise might hang around until
+		// it hits its IdleTimeout. Doing this aggressively helps keep CPU usage
+		// due to idling connections down.
+		connOut.Close()
 	}()
 
 	// Copy from proxy to client
