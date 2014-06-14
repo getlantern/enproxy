@@ -1,6 +1,7 @@
 package enproxy
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -55,15 +56,9 @@ func (c *Conn) processReads() {
 				// Old response finished, start a new one
 				resp, err = c.doRequest(proxyConn, bufReader, proxyHost, "GET", nil)
 				if err != nil {
-					c.readResponsesCh <- rwResponse{0, io.EOF}
+					c.readResponsesCh <- rwResponse{0, fmt.Errorf("Unable to do GET: %s", err)}
 					return
 				}
-			}
-
-			if resp.Header.Get(X_ENPROXY_EOF) == "true" {
-				// Hit EOF on upstream server, return EOF to reader
-				c.readResponsesCh <- rwResponse{0, io.EOF}
-				return
 			}
 
 			// Process read, but don't wait longer than IdleTimeout
@@ -73,10 +68,11 @@ func (c *Conn) processReads() {
 				c.markActive()
 			}
 
+			hitEOFUpstream := resp.Header.Get(X_ENPROXY_EOF) == "true"
 			errToClient := err
-			if err == io.EOF {
-				// The current response hit EOF, but that doesn't mean the
-				// upstream server returned EOF, so suppress EOF to reader
+			if err == io.EOF && !hitEOFUpstream {
+				// The current response hit EOF, but we haven't hit EOF upstream
+				// so suppress EOF to reader
 				errToClient = nil
 			}
 			c.readResponsesCh <- rwResponse{n, errToClient}
@@ -86,6 +82,10 @@ func (c *Conn) processReads() {
 					// Current response is done
 					resp.Body.Close()
 					resp = nil
+					if hitEOFUpstream {
+						// True EOF, stop reading
+						return
+					}
 					continue
 				} else {
 					log.Printf("Unexpected error reading from proxyConn: %s", err)
@@ -110,6 +110,7 @@ func (c *Conn) cleanupAfterReads(resp *http.Response) {
 	for {
 		select {
 		case <-c.readRequestsCh:
+			log.Println("cleaning up reads, sending EOF")
 			c.readResponsesCh <- rwResponse{0, io.EOF}
 		case <-c.stopReadCh:
 			// do nothing

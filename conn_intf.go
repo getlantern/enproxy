@@ -2,6 +2,7 @@ package enproxy
 
 import (
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -18,7 +19,7 @@ const (
 var (
 	defaultWriteFlushTimeout = 15 * time.Millisecond
 	defaultReadFlushTimeout  = 35 * time.Millisecond
-	defaultIdleTimeout       = 15 * time.Second
+	defaultIdleTimeout       = 70 * time.Second
 
 	// channelDepth: controls depth of processing channels.  Doesn't need to be
 	// particularly big, as it's just used to prevent deadlocks in operations
@@ -159,6 +160,7 @@ func (c *Conn) Read(b []byte) (n int, err error) {
 	if c.submitRead(b) {
 		res, ok := <-c.readResponsesCh
 		if !ok {
+			log.Println("Read not okay, returning EOF")
 			return 0, io.EOF
 		} else {
 			return res.n, res.err

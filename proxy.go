@@ -202,7 +202,11 @@ func (p *Proxy) handleRead(resp http.ResponseWriter, req *http.Request, lc *lazy
 					// If we didn't read yet, keep response open
 				}
 			default:
-				lc.hitEOF = true
+				if readErr == io.EOF {
+					lc.hitEOF = true
+				} else {
+					log.Printf("Unexpected error reading from upstream: %s", readErr)
+				}
 				return
 			}
 		}
