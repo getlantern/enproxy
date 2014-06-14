@@ -15,10 +15,6 @@ const (
 	DEFAULT_BUFFER_SIZE = 8096
 )
 
-var (
-	defaultFlushInterval = 35 * time.Millisecond
-)
-
 // Proxy is the server side to an enproxy.Client.  Proxy implements the
 // http.Handler interface for plugging into an HTTP server, and it also
 // provides a convenience ListenAndServe() function for quickly starting up
@@ -32,8 +28,8 @@ type Proxy struct {
 	// if this server was originally reached by e.g. DNS round robin.
 	Host string
 
-	// FlushInterval: how frequently to flush the response to the client,
-	// defaults to 35ms.
+	// FlushInterval: how long to let reads idle before writing out a
+	// response to the client.  Defaults to 35 milliseconds.
 	FlushInterval time.Duration
 
 	// IdleTimeout: how long to wait before closing an idle connection, defaults
@@ -53,7 +49,7 @@ func (p *Proxy) Start() {
 		}
 	}
 	if p.FlushInterval == 0 {
-		p.FlushInterval = defaultFlushInterval
+		p.FlushInterval = defaultReadFlushInterval
 	}
 	if p.IdleTimeout == 0 {
 		p.IdleTimeout = defaultIdleTimeout

@@ -16,8 +16,9 @@ const (
 )
 
 var (
-	defaultIdleInterval = 15 * time.Millisecond
-	defaultIdleTimeout  = 70 * time.Second
+	defaultWriteFlushInterval = 15 * time.Millisecond
+	defaultReadFlushInterval  = 35 * time.Millisecond
+	defaultIdleTimeout        = 70 * time.Second
 
 	emptyBuffer = []byte{}
 )
@@ -73,21 +74,25 @@ type Conn struct {
 	// id: unique identifier for this connection
 	id string
 
-	/* Channels for processing reads, writes and closes */
+	/* Write processing */
 	writeRequestsCh  chan []byte     // requests to write
 	writeResponsesCh chan rwResponse // responses for writes
 	stopWriteCh      chan interface{}
 	doneWriting      bool
 	writeMutex       sync.RWMutex
-	readRequestsCh   chan []byte     // requests to read
-	readResponsesCh  chan rwResponse // responses for reads
-	stopReadCh       chan interface{}
-	doneReading      bool
-	readMutex        sync.RWMutex
-	reqOutCh         chan *io.PipeReader // channel for next outgoing request body
-	stopReqCh        chan interface{}
-	doneRequesting   bool
-	requestMutex     sync.RWMutex
+
+	/* Read processing */
+	readRequestsCh  chan []byte     // requests to read
+	readResponsesCh chan rwResponse // responses for reads
+	stopReadCh      chan interface{}
+	doneReading     bool
+	readMutex       sync.RWMutex
+
+	/* Request processing */
+	reqOutCh       chan *io.PipeReader // channel for next outgoing request body
+	stopReqCh      chan interface{}
+	doneRequesting bool
+	requestMutex   sync.RWMutex
 
 	/* Fields for tracking activity/closed status */
 	lastActivityTime  time.Time    // time of last read or write
@@ -118,9 +123,9 @@ type Config struct {
 	// NewRequest: function to create a new request to the proxy
 	NewRequest newRequestFunc
 
-	// IdleInterval: how long to let the write idle before writing out a
+	// FlushInterval: how long to let writes idle before writing out a
 	// request to the proxy.  Defaults to 15 milliseconds.
-	IdleInterval time.Duration
+	FlushInterval time.Duration
 
 	// IdleTimeout: how long to wait before closing an idle connection, defaults
 	// to 70 seconds.  The high default value is selected to work well with XMPP

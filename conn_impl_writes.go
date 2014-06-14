@@ -31,7 +31,7 @@ func (c *Conn) processWrites() {
 			}
 		case <-c.stopWriteCh:
 			return
-		case <-time.After(c.Config.IdleInterval):
+		case <-time.After(c.Config.FlushInterval):
 			if c.isIdle() {
 				// Connection is idle, stop writing
 				return

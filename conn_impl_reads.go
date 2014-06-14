@@ -18,9 +18,8 @@ func (c *Conn) submitRead(b []byte) bool {
 	}
 }
 
-// processReads processes read requests until EOF is reached on the response to
-// our encapsulated HTTP request, or we've hit our idle interval and still
-// haven't received a read request.
+// processReads processes read requests by polling the proxy with GET requests
+// and reading the data from the resulting response body.
 func (c *Conn) processReads() {
 	var resp *http.Response
 

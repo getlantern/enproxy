@@ -33,8 +33,8 @@ func (c *Conn) Connect() (err error) {
 }
 
 func (c *Conn) initDefaults() {
-	if c.Config.IdleInterval == 0 {
-		c.Config.IdleInterval = defaultIdleInterval
+	if c.Config.FlushInterval == 0 {
+		c.Config.FlushInterval = defaultWriteFlushInterval
 	}
 	if c.Config.IdleTimeout == 0 {
 		c.Config.IdleTimeout = defaultIdleTimeout
