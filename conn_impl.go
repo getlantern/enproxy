@@ -16,9 +16,6 @@ import (
 // Connect opens a connection to the proxy and starts processing writes and
 // reads to this Conn.
 func (c *Conn) Connect() (err error) {
-	// Generate a unique id for this connection.  This is used by the Proxy to
-	// associate requests from this connection to the corresponding outbound
-	// connection on the proxy side.
 	c.id = uuid.NewRandom().String()
 
 	c.initDefaults()
@@ -41,18 +38,16 @@ func (c *Conn) initDefaults() {
 	}
 }
 
-// makeChannels makes all the channels that we need for processing read, write
-// and close requests on this connection.
 func (c *Conn) makeChannels() {
 	c.proxyHostCh = make(chan string)
-	c.writeRequestsCh = make(chan []byte, 100)
-	c.writeResponsesCh = make(chan rwResponse, 100)
-	c.stopWriteCh = make(chan interface{}, 100)
-	c.readRequestsCh = make(chan []byte, 100)
-	c.readResponsesCh = make(chan rwResponse, 100)
-	c.stopReadCh = make(chan interface{}, 100)
-	c.requestOutCh = make(chan *io.PipeReader, 100)
-	c.stopRequestCh = make(chan interface{}, 100)
+	c.writeRequestsCh = make(chan []byte, channelDepth)
+	c.writeResponsesCh = make(chan rwResponse, channelDepth)
+	c.stopWriteCh = make(chan interface{}, channelDepth)
+	c.readRequestsCh = make(chan []byte, channelDepth)
+	c.readResponsesCh = make(chan rwResponse, channelDepth)
+	c.stopReadCh = make(chan interface{}, channelDepth)
+	c.requestOutCh = make(chan *io.PipeReader, channelDepth)
+	c.stopRequestCh = make(chan interface{}, channelDepth)
 }
 
 func (c *Conn) dialProxy() (proxyConn net.Conn, bufReader *bufio.Reader, err error) {
@@ -66,12 +61,21 @@ func (c *Conn) dialProxy() (proxyConn net.Conn, bufReader *bufio.Reader, err err
 }
 
 func (c *Conn) doRequest(proxyConn net.Conn, bufReader *bufio.Reader, host string, method string, body io.ReadCloser) (resp *http.Response, err error) {
-	req, err := c.buildRequest(host, method, body)
+	req, err := c.Config.NewRequest(host, method, body)
 	if err != nil {
 		err = fmt.Errorf("Unable to construct request to proxy: %s", err)
 		return
 	}
+	// Always send our connection id
+	req.Header.Set(X_ENPROXY_ID, c.id)
+	// Always send the address that we're trying to reach
+	req.Header.Set(X_ENPROXY_DEST_ADDR, c.Addr)
 
+	// Important - we set WriteDeadline and ReadDeadline separately instead of
+	// calling SetDeadline because we will later change the read and write
+	// deadlines independently.
+
+	// Don't spend more than IdleTimeout trying to write to request
 	proxyConn.SetWriteDeadline(time.Now().Add(c.Config.IdleTimeout))
 	err = req.Write(proxyConn)
 	if err != nil {
@@ -79,6 +83,7 @@ func (c *Conn) doRequest(proxyConn net.Conn, bufReader *bufio.Reader, host strin
 		return
 	}
 
+	// Don't spend more than IdleTimeout trying to read from request
 	proxyConn.SetReadDeadline(time.Now().Add(c.Config.IdleTimeout))
 	resp, err = http.ReadResponse(bufReader, req)
 	if err != nil {
@@ -94,20 +99,6 @@ func (c *Conn) doRequest(proxyConn net.Conn, bufReader *bufio.Reader, host strin
 		resp = nil
 	}
 
-	return
-}
-
-// buildRequest builds a request using the given parameters and adding the
-// enproxy-specific headers.
-func (c *Conn) buildRequest(host string, method string, requestBody io.ReadCloser) (req *http.Request, err error) {
-	req, err = c.Config.NewRequest(host, method, requestBody)
-	if err != nil {
-		return nil, fmt.Errorf("Unable to construct request to proxy: %s", err)
-	}
-	// Send our connection id
-	req.Header.Set(X_ENPROXY_ID, c.id)
-	// Send the address that we're trying to reach
-	req.Header.Set(X_ENPROXY_DEST_ADDR, c.Addr)
 	return
 }
 

@@ -19,6 +19,11 @@ var (
 	defaultWriteFlushTimeout = 15 * time.Millisecond
 	defaultReadFlushTimeout  = 35 * time.Millisecond
 	defaultIdleTimeout       = 70 * time.Second
+
+	// channelDepth: controls depth of processing channels.  Doesn't need to be
+	// particularly big, as it's just used to prevent deadlocks in operations
+	// that involve multiple channels.
+	channelDepth = 100
 )
 
 // Conn is a net.Conn that tunnels its data via an httpconn.Proxy using HTTP
@@ -69,7 +74,9 @@ type Conn struct {
 	// robin).
 	proxyHostCh chan string
 
-	// id: unique identifier for this connection
+	// id: unique identifier for this connection. This is used by the Proxy to
+	// associate requests from this connection to the corresponding outbound
+	// connection on the Proxy side.  It is populated using a type 4 UUID.
 	id string
 
 	/* Write processing */
