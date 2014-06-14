@@ -112,6 +112,12 @@ func (p *Proxy) handlePOST(resp http.ResponseWriter, req *http.Request, connOut 
 		badGateway(resp, fmt.Sprintf("Unable to write to connOut: %s", err))
 		return
 	}
+	if p.Host != "" {
+		// Always feed this so clients will be guaranteed to reach
+		// this particular proxy even if they originally reached us
+		// through (e.g.) DNS round robin.
+		resp.Header().Set(X_HTTPCONN_PROXY_HOST, p.Host)
+	}
 	resp.WriteHeader(200)
 }
 
