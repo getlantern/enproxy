@@ -75,9 +75,6 @@ func (c *Conn) processReads() {
 				// so suppress EOF to reader
 				errToClient = nil
 			}
-			if hitEOFUpstream {
-				log.Printf("Hit EOF upstream with %d bytes read: ", n)
-			}
 			c.readResponsesCh <- rwResponse{n, errToClient}
 
 			if err != nil {
