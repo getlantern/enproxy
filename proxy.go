@@ -13,7 +13,8 @@ import (
 const (
 	BAD_GATEWAY = 502
 
-	DEFAULT_READ_BUFFER_SIZE = 65536
+	DEFAULT_BYTES_BEFORE_FLUSH = 1024768
+	DEFAULT_READ_BUFFER_SIZE   = 65536
 )
 
 // Proxy is the server side to an enproxy.Client.  Proxy implements the
@@ -32,6 +33,11 @@ type Proxy struct {
 	// FlushTimeout: how long to let reads idle before writing out a
 	// response to the client.  Defaults to 35 milliseconds.
 	FlushTimeout time.Duration
+
+	// BytesBeforeFlush: how many bytes to read before flushing response to
+	// client.  Periodically flushing the response keeps the response buffer
+	// from getting too big when processing big downloads.
+	BytesBeforeFlush int
 
 	// IdleTimeout: how long to wait before closing an idle connection, defaults
 	// to 70 seconds
@@ -62,6 +68,9 @@ func (p *Proxy) Start() {
 	}
 	if p.ReadBufferSize == 0 {
 		p.ReadBufferSize = DEFAULT_READ_BUFFER_SIZE
+	}
+	if p.BytesBeforeFlush == 0 {
+		p.BytesBeforeFlush = DEFAULT_BYTES_BEFORE_FLUSH
 	}
 	p.connMap = make(map[string]*lazyConn)
 }
@@ -141,7 +150,7 @@ func (p *Proxy) handleGET(resp http.ResponseWriter, req *http.Request, lc *lazyC
 	b := make([]byte, p.ReadBufferSize)
 	first := true
 	start := time.Now()
-	bytesRead := 0
+	haveRead := false
 	bytesInBatch := 0
 	for {
 		readDeadline := time.Now().Add(p.FlushTimeout)
@@ -151,7 +160,7 @@ func (p *Proxy) handleGET(resp http.ResponseWriter, req *http.Request, lc *lazyC
 		n, readErr := connOut.Read(b)
 		if first {
 			if readErr == io.EOF {
-				// Reached EOF
+				// Reached EOF, tell client using a special header
 				resp.Header().Set(X_ENPROXY_EOF, "true")
 			}
 			if p.Host != "" {
@@ -169,12 +178,12 @@ func (p *Proxy) handleGET(resp http.ResponseWriter, req *http.Request, lc *lazyC
 		if n > 0 {
 			_, writeErr := resp.Write(b[:n])
 			if writeErr != nil {
-				log.Printf("Write error: %s", writeErr)
+				log.Printf("Error writing to response: %s", writeErr)
 				connOut.Close()
 				return
 			}
-			bytesRead += n
 			bytesInBatch += n
+			haveRead = true
 		}
 
 		// Inspect readErr to decide whether or not to continue reading
@@ -182,12 +191,15 @@ func (p *Proxy) handleGET(resp http.ResponseWriter, req *http.Request, lc *lazyC
 			switch e := readErr.(type) {
 			case net.Error:
 				if e.Timeout() {
-					// This means that we hit our idleInterval, which is okay
-					// If we've read some data, return response to client, but
-					// leave connOut open
-					if bytesRead > 0 {
+					// This means that we hit our FlushInterval, which is okay.
+					// If we've read some data, return a response to client, so
+					// that it gets the data sooner rather than later, and leave
+					// connOut open for future read requests.
+					if haveRead {
 						return
 					}
+
+					// If we didn't read yet, keep response open
 				}
 			default:
 				lc.hitEOF = true
@@ -196,19 +208,22 @@ func (p *Proxy) handleGET(resp http.ResponseWriter, req *http.Request, lc *lazyC
 		}
 
 		if time.Now().Sub(start) > 10*time.Second {
-			// We've spent 10 seconds reading, return so that CloudFlare doesn't
-			// time us out
+			// We've spent more than 10 seconds reading, return so that
+			// CloudFlare doesn't time us out
 			return
 		}
 
-		if bytesInBatch > 1024768 {
+		if bytesInBatch > p.BytesBeforeFlush {
+			// We've read a good chunk, flush the response to keep its buffer
+			// from getting too big.
 			resp.(http.Flusher).Flush()
 			bytesInBatch = 0
 		}
 	}
 }
 
-// getLazyConn gets the lazyConn corresponding to the given id and addr
+// getLazyConn gets the lazyConn corresponding to the given id and addr, or
+// creates a new one and saves it to connMap.
 func (p *Proxy) getLazyConn(id string, addr string) (l *lazyConn) {
 	p.connMapMutex.Lock()
 	defer p.connMapMutex.Unlock()
