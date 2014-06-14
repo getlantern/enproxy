@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	BAD_GATEWAY         = 502
-	DEFAULT_BUFFER_SIZE = 8096
+	BAD_GATEWAY = 502
+
+	DEFAULT_READ_BUFFER_SIZE = 65536
 )
 
 // Proxy is the server side to an enproxy.Client.  Proxy implements the
@@ -36,9 +37,14 @@ type Proxy struct {
 	// to 70 seconds
 	IdleTimeout time.Duration
 
-	connMap map[string]*lazyConn // map of outbound connections by their id
+	// ReadBufferSize: size of read buffer in bytes
+	ReadBufferSize int
 
-	connMapMutex sync.Mutex // mutex for controlling access to connMap
+	// connMap: map of outbound connections by their id
+	connMap map[string]*lazyConn
+
+	// connMapMutex: synchronizes access to connMap
+	connMapMutex sync.Mutex
 }
 
 // Start() starts this proxy
@@ -54,11 +60,14 @@ func (p *Proxy) Start() {
 	if p.IdleTimeout == 0 {
 		p.IdleTimeout = defaultIdleTimeout
 	}
+	if p.ReadBufferSize == 0 {
+		p.ReadBufferSize = DEFAULT_READ_BUFFER_SIZE
+	}
 	p.connMap = make(map[string]*lazyConn)
 }
 
 // ListenAndServe: convenience function for quickly starting up a dedicated HTTP
-// server using this Proxy as its handler.
+// server using this Proxy as its handler
 func (p *Proxy) ListenAndServe(addr string) error {
 	p.Start()
 	httpServer := &http.Server{
@@ -70,7 +79,7 @@ func (p *Proxy) ListenAndServe(addr string) error {
 	return httpServer.ListenAndServe()
 }
 
-// ServeHTTP: implements the http.Handler interface.
+// ServeHTTP: implements the http.Handler interface
 func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	id := req.Header.Get(X_ENPROXY_ID)
 	if id == "" {
@@ -122,12 +131,14 @@ func (p *Proxy) handlePOST(resp http.ResponseWriter, req *http.Request, connOut 
 // response is finished and client needs to make a new GET request.
 func (p *Proxy) handleGET(resp http.ResponseWriter, req *http.Request, lc *lazyConn, connOut net.Conn) {
 	if lc.hitEOF {
+		// We hit EOF on the server while processing a previous request,
+		// immediately return EOF to the client
 		resp.Header().Set(X_ENPROXY_EOF, "true")
 		resp.WriteHeader(200)
 		return
 	}
 
-	b := make([]byte, 64000)
+	b := make([]byte, p.ReadBufferSize)
 	first := true
 	start := time.Now()
 	bytesRead := 0
