@@ -56,22 +56,7 @@ func (c *Conn) makeChannels() {
 }
 
 func (c *Conn) processWrites() {
-	defer func() {
-		c.writeMutex.Lock()
-		c.doneWriting = true
-		c.writeMutex.Unlock()
-		for {
-			select {
-			case <-c.writeRequestsCh:
-				c.writeResponsesCh <- rwResponse{0, io.EOF}
-			case <-c.stopWriteCh:
-				// do nothing
-			default:
-				close(c.writeRequestsCh)
-				return
-			}
-		}
-	}()
+	defer c.cleanupAfterWrites()
 
 	for {
 		if c.isClosed() {
@@ -100,31 +85,30 @@ func (c *Conn) processWrites() {
 	}
 }
 
+func (c *Conn) cleanupAfterWrites() {
+	c.writeMutex.Lock()
+	c.doneWriting = true
+	c.writeMutex.Unlock()
+	for {
+		select {
+		case <-c.writeRequestsCh:
+			c.writeResponsesCh <- rwResponse{0, io.EOF}
+		case <-c.stopWriteCh:
+			// do nothing
+		default:
+			close(c.writeRequestsCh)
+			return
+		}
+	}
+}
+
 // processReads processes read requests until EOF is reached on the response to
 // our encapsulated HTTP request, or we've hit our idle interval and still
 // haven't received a read request.
 func (c *Conn) processReads() {
 	var resp *http.Response
 
-	defer func() {
-		c.readMutex.Lock()
-		c.doneReading = true
-		c.readMutex.Unlock()
-		for {
-			select {
-			case <-c.readRequestsCh:
-				c.readResponsesCh <- rwResponse{0, io.EOF}
-			case <-c.stopReadCh:
-				// do nothing
-			default:
-				close(c.readRequestsCh)
-				if resp != nil {
-					resp.Body.Close()
-				}
-				return
-			}
-		}
-	}()
+	defer c.cleanupAfterReads(resp)
 
 	// Dial proxy
 	proxyConn, bufReader, err := c.dialProxy()
@@ -196,6 +180,26 @@ func (c *Conn) processReads() {
 	return
 }
 
+func (c *Conn) cleanupAfterReads(resp *http.Response) {
+	c.readMutex.Lock()
+	c.doneReading = true
+	c.readMutex.Unlock()
+	for {
+		select {
+		case <-c.readRequestsCh:
+			c.readResponsesCh <- rwResponse{0, io.EOF}
+		case <-c.stopReadCh:
+			// do nothing
+		default:
+			close(c.readRequestsCh)
+			if resp != nil {
+				resp.Body.Close()
+			}
+			return
+		}
+	}
+}
+
 // processRequests handles writing outbound requests to the proxy.  Note - this
 // is not pipelined, because we cannot be sure that intervening proxies will
 // deliver requests to the enproxy server in order. In-order delivery is
@@ -204,25 +208,7 @@ func (c *Conn) processReads() {
 func (c *Conn) processRequests() {
 	var resp *http.Response
 
-	defer func() {
-		c.requestMutex.Lock()
-		c.doneRequesting = true
-		c.requestMutex.Unlock()
-		for {
-			select {
-			case <-c.reqOutCh:
-				// do nothing
-			case <-c.stopReqCh:
-				// do nothing
-			default:
-				close(c.reqOutCh)
-				if resp != nil {
-					resp.Body.Close()
-				}
-				return
-			}
-		}
-	}()
+	defer c.cleanupAfterRequests(resp)
 
 	// Dial proxy
 	proxyConn, bufReader, err := c.dialProxy()
@@ -264,6 +250,26 @@ func (c *Conn) processRequests() {
 			if c.isIdle() {
 				return
 			}
+		}
+	}
+}
+
+func (c *Conn) cleanupAfterRequests(resp *http.Response) {
+	c.requestMutex.Lock()
+	c.doneRequesting = true
+	c.requestMutex.Unlock()
+	for {
+		select {
+		case <-c.reqOutCh:
+			// do nothing
+		case <-c.stopReqCh:
+			// do nothing
+		default:
+			close(c.reqOutCh)
+			if resp != nil {
+				resp.Body.Close()
+			}
+			return
 		}
 	}
 }
