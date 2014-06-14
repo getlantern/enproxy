@@ -47,9 +47,12 @@ func (c *Conn) makeChannels() {
 	c.proxyHostCh = make(chan string)
 	c.writeRequestsCh = make(chan []byte, 100)
 	c.writeResponsesCh = make(chan rwResponse, 100)
+	c.stopWriteCh = make(chan interface{}, 100)
 	c.readRequestsCh = make(chan []byte, 100)
 	c.readResponsesCh = make(chan rwResponse, 100)
+	c.stopReadCh = make(chan interface{}, 100)
 	c.reqOutCh = make(chan *io.PipeReader, 100)
+	c.stopReqCh = make(chan interface{}, 100)
 }
 
 func (c *Conn) processWrites() {
@@ -61,6 +64,8 @@ func (c *Conn) processWrites() {
 			select {
 			case <-c.writeRequestsCh:
 				c.writeResponsesCh <- rwResponse{0, io.EOF}
+			case <-c.stopWriteCh:
+				// do nothing
 			default:
 				close(c.writeRequestsCh)
 				return
@@ -76,11 +81,30 @@ func (c *Conn) processWrites() {
 		select {
 		case b := <-c.writeRequestsCh:
 			// Consume writes as long as they keep coming in
-			if !c.processWrite(b) {
-				return
-			} else {
+			if c.reqBodyWriter == nil {
+				// Lazily initialize our next request to the proxy
+				// Construct a pipe for piping data to proxy
+				reqBody, reqBodyWriter := io.Pipe()
+				c.reqBodyWriter = reqBodyWriter
+				if !c.submitRequest(reqBody) {
+					c.writeResponsesCh <- rwResponse{0, io.EOF}
+					return
+				}
+			}
+
+			// Write out data to the request body
+			n, err := c.reqBodyWriter.Write(b)
+			if n > 0 {
 				c.markActive()
 			}
+
+			// Let the caller know how it went
+			c.writeResponsesCh <- rwResponse{n, err}
+			if err != nil {
+				return
+			}
+		case <-c.stopWriteCh:
+			return
 		case <-time.After(c.Config.IdleInterval):
 			if c.isIdle() {
 				// Connection is idle, stop writing
@@ -110,6 +134,8 @@ func (c *Conn) processReads() {
 			select {
 			case <-c.readRequestsCh:
 				c.readResponsesCh <- rwResponse{0, io.EOF}
+			case <-c.stopReadCh:
+				// do nothing
 			default:
 				close(c.readRequestsCh)
 				if resp != nil {
@@ -146,6 +172,7 @@ func (c *Conn) processReads() {
 			if resp == nil {
 				resp, err = c.doRequest(proxyConn, bufReader, proxyHost, "GET", nil)
 				if err != nil {
+					c.readResponsesCh <- rwResponse{0, io.EOF}
 					return
 				}
 			}
@@ -178,6 +205,8 @@ func (c *Conn) processReads() {
 				}
 				return
 			}
+		case <-c.stopReadCh:
+			return
 		case <-time.After(c.Config.IdleTimeout):
 			if c.isIdle() {
 				return
@@ -202,6 +231,9 @@ func (c *Conn) processRequests() {
 		for {
 			select {
 			case <-c.reqOutCh:
+				// do nothing
+			case <-c.stopReqCh:
+				// do nothing
 			default:
 				close(c.reqOutCh)
 				if resp != nil {
@@ -246,37 +278,14 @@ func (c *Conn) processRequests() {
 				c.proxyHostCh <- proxyHost
 				first = false
 			}
+		case <-c.stopReqCh:
+			return
 		case <-time.After(c.Config.IdleTimeout):
 			if c.isIdle() {
 				return
 			}
 		}
 	}
-}
-
-// processWrite processes a single write, returning true if the write was
-// successful, false otherwise.
-func (c *Conn) processWrite(b []byte) (ok bool) {
-	if c.reqBodyWriter == nil {
-		// Lazily initialize our next request to the proxy
-		// Construct a pipe for piping data to proxy
-		reqBody, reqBodyWriter := io.Pipe()
-		c.reqBodyWriter = reqBodyWriter
-		if !c.submitRequest(reqBody) {
-			return false
-		}
-	}
-
-	// Write out data to the request body
-	n, err := c.reqBodyWriter.Write(b)
-	if err != nil {
-		c.writeResponsesCh <- rwResponse{n, fmt.Errorf("Unable to write to proxy pipe: %s", err)}
-		return false
-	}
-
-	// Let the caller know how much we wrote
-	c.writeResponsesCh <- rwResponse{n, nil}
-	return true
 }
 
 func (c *Conn) dialProxy() (proxyConn net.Conn, bufReader *bufio.Reader, err error) {
@@ -350,11 +359,10 @@ func (c *Conn) isIdle() bool {
 
 func (c *Conn) submitWrite(b []byte) bool {
 	c.writeMutex.RLock()
+	defer c.writeMutex.RUnlock()
 	if c.doneWriting {
-		c.writeMutex.RUnlock()
 		return false
 	} else {
-		c.writeMutex.RUnlock()
 		c.writeRequestsCh <- b
 		return true
 	}
@@ -362,11 +370,10 @@ func (c *Conn) submitWrite(b []byte) bool {
 
 func (c *Conn) submitRead(b []byte) bool {
 	c.readMutex.RLock()
+	defer c.readMutex.RUnlock()
 	if c.doneReading {
-		c.readMutex.RUnlock()
 		return false
 	} else {
-		c.readMutex.RUnlock()
 		c.readRequestsCh <- b
 		return true
 	}
@@ -374,11 +381,10 @@ func (c *Conn) submitRead(b []byte) bool {
 
 func (c *Conn) submitRequest(body *io.PipeReader) bool {
 	c.requestMutex.RLock()
+	defer c.requestMutex.RUnlock()
 	if c.doneRequesting {
-		c.requestMutex.RUnlock()
 		return false
 	} else {
-		c.requestMutex.RUnlock()
 		c.reqOutCh <- body
 		return true
 	}

@@ -2,6 +2,7 @@ package enproxy
 
 import (
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -62,13 +63,16 @@ type Conn struct {
 	/* Channels for processing reads, writes and closes */
 	writeRequestsCh  chan []byte     // requests to write
 	writeResponsesCh chan rwResponse // responses for writes
+	stopWriteCh      chan interface{}
 	doneWriting      bool
 	writeMutex       sync.RWMutex
 	readRequestsCh   chan []byte     // requests to read
 	readResponsesCh  chan rwResponse // responses for reads
+	stopReadCh       chan interface{}
 	doneReading      bool
 	readMutex        sync.RWMutex
 	reqOutCh         chan *io.PipeReader // channel for next outgoing request body
+	stopReqCh        chan interface{}
 	doneRequesting   bool
 	requestMutex     sync.RWMutex
 
@@ -131,6 +135,7 @@ func (c *Conn) Write(b []byte) (n int, err error) {
 			return res.n, res.err
 		}
 	} else {
+		log.Printf("%s - tried to write to closed conn", c.Addr)
 		return 0, io.EOF
 	}
 }
@@ -145,6 +150,7 @@ func (c *Conn) Read(b []byte) (n int, err error) {
 			return res.n, res.err
 		}
 	} else {
+		log.Printf("%s - tried to read from closed conn", c.Addr)
 		return 0, io.EOF
 	}
 }
@@ -153,7 +159,12 @@ func (c *Conn) Read(b []byte) (n int, err error) {
 func (c *Conn) Close() error {
 	c.closedMutex.Lock()
 	defer c.closedMutex.Unlock()
-	c.closed = true
+	if !c.closed {
+		c.stopReadCh <- nil
+		c.stopWriteCh <- nil
+		c.stopReqCh <- nil
+		c.closed = true
+	}
 	return nil
 }
 

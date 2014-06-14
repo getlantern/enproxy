@@ -25,7 +25,9 @@ func (c *Config) Intercept(resp http.ResponseWriter, req *http.Request) {
 		resp.WriteHeader(502)
 		fmt.Fprintf(resp, "Unable to hijack connection: %s", err)
 	}
-	defer clientConn.Close()
+	defer func() {
+		clientConn.Close()
+	}()
 
 	addr := hostIncludingPort(req)
 	c.proxied(resp, req, clientConn, buffClientConn, addr)
@@ -60,6 +62,9 @@ func pipeData(clientConn net.Conn, buffClientConn *bufio.ReadWriter, connOut *Co
 			return
 		}
 		io.Copy(connOut, buffClientConn)
+		// Client closed connection, close outbound connection since this means
+		// we're done.
+		connOut.Close()
 	}()
 
 	// Copy from proxy to client
