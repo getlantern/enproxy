@@ -16,9 +16,9 @@ const (
 )
 
 var (
-	defaultWriteFlushInterval = 15 * time.Millisecond
-	defaultReadFlushInterval  = 35 * time.Millisecond
-	defaultIdleTimeout        = 70 * time.Second
+	defaultWriteFlushTimeout = 15 * time.Millisecond
+	defaultReadFlushTimeout  = 35 * time.Millisecond
+	defaultIdleTimeout       = 70 * time.Second
 
 	emptyBuffer = []byte{}
 )
@@ -123,9 +123,9 @@ type Config struct {
 	// NewRequest: function to create a new request to the proxy
 	NewRequest newRequestFunc
 
-	// FlushInterval: how long to let writes idle before writing out a
+	// FlushTimeout: how long to let writes idle before writing out a
 	// request to the proxy.  Defaults to 15 milliseconds.
-	FlushInterval time.Duration
+	FlushTimeout time.Duration
 
 	// IdleTimeout: how long to wait before closing an idle connection, defaults
 	// to 70 seconds.  The high default value is selected to work well with XMPP

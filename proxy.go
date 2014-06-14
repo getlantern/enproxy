@@ -28,9 +28,9 @@ type Proxy struct {
 	// if this server was originally reached by e.g. DNS round robin.
 	Host string
 
-	// FlushInterval: how long to let reads idle before writing out a
+	// FlushTimeout: how long to let reads idle before writing out a
 	// response to the client.  Defaults to 35 milliseconds.
-	FlushInterval time.Duration
+	FlushTimeout time.Duration
 
 	// IdleTimeout: how long to wait before closing an idle connection, defaults
 	// to 70 seconds
@@ -48,8 +48,8 @@ func (p *Proxy) Start() {
 			return net.Dial("tcp", addr)
 		}
 	}
-	if p.FlushInterval == 0 {
-		p.FlushInterval = defaultReadFlushInterval
+	if p.FlushTimeout == 0 {
+		p.FlushTimeout = defaultReadFlushTimeout
 	}
 	if p.IdleTimeout == 0 {
 		p.IdleTimeout = defaultIdleTimeout
@@ -118,7 +118,7 @@ func (p *Proxy) handlePOST(resp http.ResponseWriter, req *http.Request, connOut 
 }
 
 // handleGET streams the data from the outbound connection to the client as
-// a response body.  If no data is read for more than FlushInterval, then the
+// a response body.  If no data is read for more than FlushTimeout, then the
 // response is finished and client needs to make a new GET request.
 func (p *Proxy) handleGET(resp http.ResponseWriter, req *http.Request, lc *lazyConn, connOut net.Conn) {
 	if lc.hitEOF {
@@ -133,7 +133,7 @@ func (p *Proxy) handleGET(resp http.ResponseWriter, req *http.Request, lc *lazyC
 	bytesRead := 0
 	bytesInBatch := 0
 	for {
-		readDeadline := time.Now().Add(p.FlushInterval)
+		readDeadline := time.Now().Add(p.FlushTimeout)
 		connOut.SetReadDeadline(readDeadline)
 
 		// Read
@@ -213,35 +213,3 @@ func badGateway(resp http.ResponseWriter, msg string) {
 	log.Printf("Responding bad gateway: %s", msg)
 	resp.WriteHeader(BAD_GATEWAY)
 }
-
-// Taken from package net/http/httputil
-type maxLatencyWriter struct {
-	dst     http.ResponseWriter
-	latency time.Duration
-
-	lk   sync.Mutex // protects Write + Flush
-	done chan bool
-}
-
-func (m *maxLatencyWriter) Write(p []byte) (int, error) {
-	m.lk.Lock()
-	defer m.lk.Unlock()
-	return m.dst.Write(p)
-}
-
-func (m *maxLatencyWriter) flushLoop() {
-	t := time.NewTicker(m.latency)
-	defer t.Stop()
-	for {
-		select {
-		case <-m.done:
-			return
-		case <-t.C:
-			m.lk.Lock()
-			m.dst.(http.Flusher).Flush()
-			m.lk.Unlock()
-		}
-	}
-}
-
-func (m *maxLatencyWriter) stop() { m.done <- true }
