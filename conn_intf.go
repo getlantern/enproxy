@@ -2,7 +2,6 @@ package enproxy
 
 import (
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -135,7 +134,6 @@ func (c *Conn) Write(b []byte) (n int, err error) {
 			return res.n, res.err
 		}
 	} else {
-		log.Printf("%s - tried to write to closed conn", c.Addr)
 		return 0, io.EOF
 	}
 }
@@ -150,7 +148,6 @@ func (c *Conn) Read(b []byte) (n int, err error) {
 			return res.n, res.err
 		}
 	} else {
-		log.Printf("%s - tried to read from closed conn", c.Addr)
 		return 0, io.EOF
 	}
 }
