@@ -55,7 +55,7 @@ func (c *Conn) processRequests() {
 			}
 
 			if first {
-				// One our first request, find out what host we're actually
+				// On our first request, find out what host we're actually
 				// talking to and remember that for future requests.
 				proxyHost = resp.Header.Get(X_ENPROXY_PROXY_HOST)
 				// Also post it to proxyHostCh so that the processReads()
