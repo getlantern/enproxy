@@ -26,9 +26,7 @@ func (c *Config) Intercept(resp http.ResponseWriter, req *http.Request) {
 		resp.WriteHeader(502)
 		fmt.Fprintf(resp, "Unable to hijack connection: %s", err)
 	}
-	defer func() {
-		clientConn.Close()
-	}()
+	defer clientConn.Close()
 
 	addr := hostIncludingPort(req, 443)
 	c.proxied(resp, req, clientConn, buffClientConn, addr)

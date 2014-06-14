@@ -143,9 +143,6 @@ type rwResponse struct {
 
 // Write() implements the function from net.Conn
 func (c *Conn) Write(b []byte) (n int, err error) {
-	if c.isClosed() {
-		return 0, io.EOF
-	}
 	if c.submitWrite(b) {
 		res, ok := <-c.writeResponsesCh
 		if !ok {
@@ -160,9 +157,6 @@ func (c *Conn) Write(b []byte) (n int, err error) {
 
 // Read() implements the function from net.Conn
 func (c *Conn) Read(b []byte) (n int, err error) {
-	if c.isClosed() {
-		return 0, io.EOF
-	}
 	if c.submitRead(b) {
 		res, ok := <-c.readResponsesCh
 		if !ok {

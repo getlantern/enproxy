@@ -160,6 +160,11 @@ func (p *Proxy) handleRead(resp http.ResponseWriter, req *http.Request, lc *lazy
 		// Read
 		n, readErr := connOut.Read(b)
 		if first {
+			if readErr == io.EOF {
+				log.Println("Telling client EOF on first read")
+				// Reached EOF, tell client using a special header
+				resp.Header().Set(X_ENPROXY_EOF, "true")
+			}
 			// Always respond 200 OK
 			resp.WriteHeader(200)
 			first = false
@@ -194,6 +199,7 @@ func (p *Proxy) handleRead(resp http.ResponseWriter, req *http.Request, lc *lazy
 				}
 			default:
 				if readErr == io.EOF {
+					log.Println("Hit EOF")
 					lc.hitEOF = true
 				} else {
 					log.Printf("Unexpected error reading from upstream: %s", readErr)
