@@ -110,16 +110,16 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	}
 
 	if req.Method == "POST" {
-		p.handlePOST(resp, req, connOut)
+		p.handleWrite(resp, req, connOut)
 	} else if req.Method == "GET" {
-		p.handleGET(resp, req, lc, connOut)
+		p.handleRead(resp, req, lc, connOut)
 	} else {
 		badGateway(resp, fmt.Sprintf("Method %s not supported", req.Method))
 	}
 }
 
-// handlePOST forwards the data from a POST to the outbound connection
-func (p *Proxy) handlePOST(resp http.ResponseWriter, req *http.Request, connOut net.Conn) {
+// handleWrite forwards the data from a POST to the outbound connection
+func (p *Proxy) handleWrite(resp http.ResponseWriter, req *http.Request, connOut net.Conn) {
 	// Pipe request
 	_, err := io.Copy(connOut, req.Body)
 	if err != nil && err != io.EOF {
@@ -135,10 +135,10 @@ func (p *Proxy) handlePOST(resp http.ResponseWriter, req *http.Request, connOut 
 	resp.WriteHeader(200)
 }
 
-// handleGET streams the data from the outbound connection to the client as
+// handleRead streams the data from the outbound connection to the client as
 // a response body.  If no data is read for more than FlushTimeout, then the
 // response is finished and client needs to make a new GET request.
-func (p *Proxy) handleGET(resp http.ResponseWriter, req *http.Request, lc *lazyConn, connOut net.Conn) {
+func (p *Proxy) handleRead(resp http.ResponseWriter, req *http.Request, lc *lazyConn, connOut net.Conn) {
 	if lc.hitEOF {
 		// We hit EOF on the server while processing a previous request,
 		// immediately return EOF to the client

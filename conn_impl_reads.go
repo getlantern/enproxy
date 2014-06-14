@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+// submitRead submits a read to the processReads goroutine, returning true if
+// the read was accepted or false if reads are no longer being accepted
 func (c *Conn) submitRead(b []byte) bool {
 	c.readMutex.RLock()
 	defer c.readMutex.RUnlock()
@@ -19,7 +21,7 @@ func (c *Conn) submitRead(b []byte) bool {
 }
 
 // processReads processes read requests by polling the proxy with GET requests
-// and reading the data from the resulting response body.
+// and reading the data from the resulting response body
 func (c *Conn) processReads() {
 	var resp *http.Response
 
@@ -33,7 +35,8 @@ func (c *Conn) processReads() {
 	}
 	defer proxyConn.Close()
 
-	// Wait for proxy host from first request
+	// Wait for proxy host determined by first write request so that we know
+	// where to send read requests
 	proxyHost := <-c.proxyHostCh
 
 	resp, err = c.doRequest(proxyConn, bufReader, proxyHost, "GET", nil)
@@ -49,6 +52,7 @@ func (c *Conn) processReads() {
 		select {
 		case b := <-c.readRequestsCh:
 			if resp == nil {
+				// Old response finished, start a new one
 				resp, err = c.doRequest(proxyConn, bufReader, proxyHost, "GET", nil)
 				if err != nil {
 					c.readResponsesCh <- rwResponse{0, io.EOF}
@@ -57,11 +61,12 @@ func (c *Conn) processReads() {
 			}
 
 			if resp.Header.Get(X_ENPROXY_EOF) == "true" {
+				// Hit EOF on upstream server, return EOF to reader
 				c.readResponsesCh <- rwResponse{0, io.EOF}
 				return
 			}
 
-			// Process read
+			// Process read, but don't wait longer than IdleTimeout
 			proxyConn.SetReadDeadline(time.Now().Add(c.Config.IdleTimeout))
 			n, err := resp.Body.Read(b)
 			if n > 0 {
@@ -70,12 +75,15 @@ func (c *Conn) processReads() {
 
 			errToClient := err
 			if err == io.EOF {
-				// Don't propagate EOF to client
+				// The current response hit EOF, but that doesn't mean the
+				// upstream server returned EOF, so suppress EOF to reader
 				errToClient = nil
 			}
 			c.readResponsesCh <- rwResponse{n, errToClient}
+
 			if err != nil {
 				if err == io.EOF {
+					// Current response is done
 					resp.Body.Close()
 					resp = nil
 					continue

@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+// submitWrite submits a write to the processWrites goroutine, returning true if
+// the write was accepted or false if writes are no longer being accepted
 func (c *Conn) submitWrite(b []byte) bool {
 	c.writeMutex.RLock()
 	defer c.writeMutex.RUnlock()
@@ -16,6 +18,14 @@ func (c *Conn) submitWrite(b []byte) bool {
 	}
 }
 
+// processWrites processes write requests by writing them to the body of a POST
+// request.  Note - processWrites doesn't actually send the POST requests,
+// that's handled by the processRequests goroutine.  The reason that we do this
+// on a separate goroutine is that the call to Request.Write() blocks until the
+// body has finished, and of course the body is written to as a result of
+// processing writes, so we need 2 goroutines to allow us to continue to
+// accept writes and pipe these to the request body while actually sending that
+// request body to the server.
 func (c *Conn) processWrites() {
 	defer c.cleanupAfterWrites()
 
@@ -27,6 +37,7 @@ func (c *Conn) processWrites() {
 		select {
 		case b := <-c.writeRequestsCh:
 			if !c.processWrite(b) {
+				// There was a problem processing a write, stop
 				return
 			}
 		case <-c.stopWriteCh:
@@ -36,7 +47,7 @@ func (c *Conn) processWrites() {
 				// Connection is idle, stop writing
 				return
 			}
-			// We waited more than PollInterval for a write, close our request
+			// We waited more than FlushTimeout for a write, close our request
 			// body writer so that it can get flushed to the server
 			if c.reqBodyWriter != nil {
 				c.reqBodyWriter.Close()
@@ -46,6 +57,8 @@ func (c *Conn) processWrites() {
 	}
 }
 
+// processWrite processes a single write request, lazily starting a new POST
+// to the proxy when necessary.
 func (c *Conn) processWrite(b []byte) bool {
 	// Consume writes as long as they keep coming in
 	if c.reqBodyWriter == nil {

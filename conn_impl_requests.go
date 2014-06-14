@@ -7,6 +7,9 @@ import (
 	"time"
 )
 
+// submitRequest submits a request to the processRequests goroutine, returning
+// true if the request was accepted or false if requests are no longer being
+// accepted
 func (c *Conn) submitRequest(body *io.PipeReader) bool {
 	c.requestMutex.RLock()
 	defer c.requestMutex.RUnlock()
@@ -45,20 +48,18 @@ func (c *Conn) processRequests() {
 		}
 
 		select {
-		case reqBody, ok := <-c.requestOutCh:
-			if !ok {
-				// done processing requests
-				return
-			}
-
+		case reqBody := <-c.requestOutCh:
 			resp, err = c.doRequest(proxyConn, bufReader, proxyHost, "POST", reqBody)
 			if err != nil {
 				return
 			}
 
 			if first {
-				// Lazily initialize proxyHost
+				// One our first request, find out what host we're actually
+				// talking to and remember that for future requests.
 				proxyHost = resp.Header.Get(X_ENPROXY_PROXY_HOST)
+				// Also post it to proxyHostCh so that the processReads()
+				// routine knows which proxyHost to use
 				c.proxyHostCh <- proxyHost
 				first = false
 			}
