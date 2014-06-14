@@ -163,12 +163,6 @@ func (p *Proxy) handleRead(resp http.ResponseWriter, req *http.Request, lc *lazy
 				// Reached EOF, tell client using a special header
 				resp.Header().Set(X_ENPROXY_EOF, "true")
 			}
-			if p.Host != "" {
-				// Always feed this so clients will be guaranteed to reach
-				// this particular proxy even if they originally reached us
-				// through (e.g.) DNS round robin.
-				resp.Header().Set(X_ENPROXY_PROXY_HOST, p.Host)
-			}
 			// Always respond 200 OK
 			resp.WriteHeader(200)
 			first = false
