@@ -62,7 +62,7 @@ func (c *Conn) processReads() {
 				return
 			}
 
-			// Read
+			// Process read
 			proxyConn.SetReadDeadline(time.Now().Add(c.Config.IdleTimeout))
 			n, err := resp.Body.Read(b)
 			if n > 0 {
@@ -82,8 +82,8 @@ func (c *Conn) processReads() {
 					continue
 				} else {
 					log.Printf("Unexpected error reading from proxyConn: %s", err)
+					return
 				}
-				return
 			}
 		case <-c.stopReadCh:
 			return
