@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -29,7 +30,7 @@ func (c *Config) Intercept(resp http.ResponseWriter, req *http.Request) {
 		clientConn.Close()
 	}()
 
-	addr := hostIncludingPort(req)
+	addr := hostIncludingPort(req, 443)
 	c.proxied(resp, req, clientConn, buffClientConn, addr)
 }
 
@@ -90,10 +91,12 @@ func respondOK(clientConn net.Conn, req *http.Request) error {
 	return resp.Write(clientConn)
 }
 
-func hostIncludingPort(req *http.Request) string {
+// hostIncludingPort extracts the host:port from a request.  It fills in a
+// a default port if none was found in the request.
+func hostIncludingPort(req *http.Request, defaultPort int) string {
 	parts := strings.Split(req.Host, ":")
 	if len(parts) == 1 {
-		return req.Host + ":443"
+		return req.Host + ":" + strconv.Itoa(defaultPort)
 	} else {
 		return req.Host
 	}
