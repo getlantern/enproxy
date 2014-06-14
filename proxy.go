@@ -139,7 +139,7 @@ func (p *Proxy) handleWrite(resp http.ResponseWriter, req *http.Request, connOut
 // a response body.  If no data is read for more than FlushTimeout, then the
 // response is finished and client needs to make a new GET request.
 func (p *Proxy) handleRead(resp http.ResponseWriter, req *http.Request, lc *lazyConn, connOut net.Conn) {
-	if lc.hitEOF {
+	if lc.isEOF() {
 		// We hit EOF on the server while processing a previous request,
 		// immediately return EOF to the client
 		log.Println("Telling client EOF before reading")
@@ -200,7 +200,7 @@ func (p *Proxy) handleRead(resp http.ResponseWriter, req *http.Request, lc *lazy
 			default:
 				if readErr == io.EOF {
 					log.Println("Hit EOF")
-					lc.hitEOF = true
+					lc.markEOF()
 				} else {
 					log.Printf("Unexpected error reading from upstream: %s", readErr)
 				}
