@@ -72,15 +72,15 @@ func (p *Proxy) ListenAndServe(addr string) error {
 
 // ServeHTTP: implements the http.Handler interface.
 func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
-	id := req.Header.Get(X_HTTPCONN_ID)
+	id := req.Header.Get(X_ENPROXY_ID)
 	if id == "" {
-		badGateway(resp, fmt.Sprintf("No id found in header %s", X_HTTPCONN_ID))
+		badGateway(resp, fmt.Sprintf("No id found in header %s", X_ENPROXY_ID))
 		return
 	}
 
-	addr := req.Header.Get(X_HTTPCONN_DEST_ADDR)
+	addr := req.Header.Get(X_ENPROXY_DEST_ADDR)
 	if addr == "" {
-		badGateway(resp, fmt.Sprintf("No address found in header %s", X_HTTPCONN_DEST_ADDR))
+		badGateway(resp, fmt.Sprintf("No address found in header %s", X_ENPROXY_DEST_ADDR))
 		return
 	}
 
@@ -112,7 +112,7 @@ func (p *Proxy) handlePOST(resp http.ResponseWriter, req *http.Request, connOut 
 		// Always feed this so clients will be guaranteed to reach
 		// this particular proxy even if they originally reached us
 		// through (e.g.) DNS round robin.
-		resp.Header().Set(X_HTTPCONN_PROXY_HOST, p.Host)
+		resp.Header().Set(X_ENPROXY_PROXY_HOST, p.Host)
 	}
 	resp.WriteHeader(200)
 }
@@ -122,7 +122,7 @@ func (p *Proxy) handlePOST(resp http.ResponseWriter, req *http.Request, connOut 
 // response is finished and client needs to make a new GET request.
 func (p *Proxy) handleGET(resp http.ResponseWriter, req *http.Request, lc *lazyConn, connOut net.Conn) {
 	if lc.hitEOF {
-		resp.Header().Set(X_HTTPCONN_EOF, "true")
+		resp.Header().Set(X_ENPROXY_EOF, "true")
 		resp.WriteHeader(200)
 		return
 	}
@@ -141,13 +141,13 @@ func (p *Proxy) handleGET(resp http.ResponseWriter, req *http.Request, lc *lazyC
 		if first {
 			if readErr == io.EOF {
 				// Reached EOF
-				resp.Header().Set(X_HTTPCONN_EOF, "true")
+				resp.Header().Set(X_ENPROXY_EOF, "true")
 			}
 			if p.Host != "" {
 				// Always feed this so clients will be guaranteed to reach
 				// this particular proxy even if they originally reached us
 				// through (e.g.) DNS round robin.
-				resp.Header().Set(X_HTTPCONN_PROXY_HOST, p.Host)
+				resp.Header().Set(X_ENPROXY_PROXY_HOST, p.Host)
 			}
 			// Always respond 200 OK
 			resp.WriteHeader(200)

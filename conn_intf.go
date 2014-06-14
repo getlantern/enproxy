@@ -9,10 +9,10 @@ import (
 )
 
 const (
-	X_HTTPCONN_ID         = "X-HTTPConn-Id"
-	X_HTTPCONN_DEST_ADDR  = "X-HTTPConn-Dest-Addr"
-	X_HTTPCONN_EOF        = "X-HTTPConn-EOF"
-	X_HTTPCONN_PROXY_HOST = "X-HTTPConn-Proxy-Host"
+	X_ENPROXY_ID         = "X-Enproxy-Id"
+	X_ENPROXY_DEST_ADDR  = "X-Enproxy-Dest-Addr"
+	X_ENPROXY_EOF        = "X-Enproxy-EOF"
+	X_ENPROXY_PROXY_HOST = "X-Enproxy-Proxy-Host"
 )
 
 var (
@@ -133,16 +133,6 @@ type Config struct {
 	IdleTimeout time.Duration
 }
 
-// LocalAddr() is not implemented
-func (c *Conn) LocalAddr() net.Addr {
-	panic("LocalAddr() not implemented")
-}
-
-// RemoteAddr() is not implemented
-func (c *Conn) RemoteAddr() net.Addr {
-	panic("RemoteAddr() not implemented")
-}
-
 // Write() implements the function from net.Conn
 func (c *Conn) Write(b []byte) (n int, err error) {
 	if c.submitWrite(b) {
@@ -188,6 +178,16 @@ func (c *Conn) isClosed() bool {
 	c.closedMutex.RLock()
 	defer c.closedMutex.RUnlock()
 	return c.closed
+}
+
+// LocalAddr() is not implemented
+func (c *Conn) LocalAddr() net.Addr {
+	panic("LocalAddr() not implemented")
+}
+
+// RemoteAddr() is not implemented
+func (c *Conn) RemoteAddr() net.Addr {
+	panic("RemoteAddr() not implemented")
 }
 
 // SetDeadline() is currently unimplemented.

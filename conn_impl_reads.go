@@ -56,7 +56,7 @@ func (c *Conn) processReads() {
 				}
 			}
 
-			if resp.Header.Get(X_HTTPCONN_EOF) == "true" {
+			if resp.Header.Get(X_ENPROXY_EOF) == "true" {
 				c.readResponsesCh <- rwResponse{0, io.EOF}
 				return
 			}

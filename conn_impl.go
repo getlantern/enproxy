@@ -105,9 +105,9 @@ func (c *Conn) buildRequest(host string, method string, requestBody io.ReadClose
 		return nil, fmt.Errorf("Unable to construct request to proxy: %s", err)
 	}
 	// Send our connection id
-	req.Header.Set(X_HTTPCONN_ID, c.id)
+	req.Header.Set(X_ENPROXY_ID, c.id)
 	// Send the address that we're trying to reach
-	req.Header.Set(X_HTTPCONN_DEST_ADDR, c.Addr)
+	req.Header.Set(X_ENPROXY_DEST_ADDR, c.Addr)
 	return
 }
 

@@ -58,7 +58,7 @@ func (c *Conn) processRequests() {
 
 			if first {
 				// Lazily initialize proxyHost
-				proxyHost = resp.Header.Get(X_HTTPCONN_PROXY_HOST)
+				proxyHost = resp.Header.Get(X_ENPROXY_PROXY_HOST)
 				c.proxyHostCh <- proxyHost
 				first = false
 			}
