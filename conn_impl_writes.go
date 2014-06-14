@@ -2,7 +2,6 @@ package enproxy
 
 import (
 	"io"
-	"log"
 	"time"
 )
 
@@ -45,7 +44,6 @@ func (c *Conn) processWrites() {
 			return
 		case <-time.After(c.Config.FlushTimeout):
 			if c.isIdle() {
-				log.Println("Idled")
 				// Connection is idle, stop writing
 				return
 			}

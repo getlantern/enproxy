@@ -2,7 +2,6 @@ package enproxy
 
 import (
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -160,7 +159,6 @@ func (c *Conn) Read(b []byte) (n int, err error) {
 	if c.submitRead(b) {
 		res, ok := <-c.readResponsesCh
 		if !ok {
-			log.Println("Read not okay, returning EOF")
 			return 0, io.EOF
 		} else {
 			return res.n, res.err

@@ -96,7 +96,6 @@ func (c *Conn) processReads() {
 			return
 		case <-time.After(c.Config.IdleTimeout):
 			if c.isIdle() {
-				log.Println("Idled")
 				return
 			}
 		}
@@ -111,7 +110,6 @@ func (c *Conn) cleanupAfterReads(resp *http.Response) {
 	for {
 		select {
 		case <-c.readRequestsCh:
-			log.Println("cleaning up reads, sending EOF")
 			c.readResponsesCh <- rwResponse{0, io.EOF}
 		case <-c.stopReadCh:
 			// do nothing

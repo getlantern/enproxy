@@ -10,14 +10,13 @@ import (
 // once.  Using these allows us to ensure that we only create one connection per
 // connection id, but to still support doing the Dial calls concurrently.
 type lazyConn struct {
-	p            *Proxy
-	id           string
-	addr         string
-	hitEOF       bool
-	hitEOFMutex  sync.RWMutex
-	connOut      net.Conn
-	connOutMutex sync.Mutex
-	err          error
+	p       *Proxy
+	id      string
+	addr    string
+	hitEOF  bool
+	connOut net.Conn
+	err     error
+	mutex   sync.Mutex
 }
 
 func (p *Proxy) newLazyConn(id string, addr string) *lazyConn {
@@ -29,8 +28,8 @@ func (p *Proxy) newLazyConn(id string, addr string) *lazyConn {
 }
 
 func (l *lazyConn) get() (conn net.Conn, err error) {
-	l.connOutMutex.Lock()
-	defer l.connOutMutex.Unlock()
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
 	if l.err != nil {
 		// If dial already resulted in an error, return that
 		return nil, err
@@ -50,16 +49,4 @@ func (l *lazyConn) get() (conn net.Conn, err error) {
 	}
 
 	return l.connOut, l.err
-}
-
-func (l *lazyConn) markEOF() {
-	l.hitEOFMutex.Lock()
-	defer l.hitEOFMutex.Unlock()
-	l.hitEOF = true
-}
-
-func (l *lazyConn) isEOF() bool {
-	l.hitEOFMutex.RLock()
-	defer l.hitEOFMutex.RUnlock()
-	return l.hitEOF
 }

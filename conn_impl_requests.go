@@ -67,7 +67,6 @@ func (c *Conn) processRequests() {
 			return
 		case <-time.After(c.Config.IdleTimeout):
 			if c.isIdle() {
-				log.Println("Idled")
 				return
 			}
 		}
