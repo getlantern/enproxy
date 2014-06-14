@@ -95,7 +95,7 @@ func (c *idleTimingConn) markActive() {
 
 func (c *idleTimingConn) closeIfNecessary() bool {
 	if time.Now().Sub(c.lastActivityTime) > c.idleTimeout {
-		//c.Close()
+		c.Close()
 		return true
 	}
 	return false
