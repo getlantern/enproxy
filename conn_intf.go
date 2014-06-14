@@ -28,19 +28,33 @@ var (
 // the one used by meek, but different in that data is not encoded as JSON.
 // https://trac.torproject.org/projects/tor/wiki/doc/AChildsGardenOfPluggableTransports#Undertheencryption.
 //
-// enproxy doesn't support request pipelining, so new requests are only sent
-// after previous responses have been read.
+// enproxy uses two parallel channels to send and receive data.  One channel
+// handles writing data out by making sequential POST requests to the server
+// which encapsulate the outbound data in their request bodies, while the other
+// channel handles reading data by making GET requests and grabbing the data
+// encapsulated in the response bodies.
 //
-// The basics flow is as follows:
-//   1. Accept writes, piping these to the proxy as the body of an http request
+// Write Channel:
+//
+//   1. Accept writes, piping these to the proxy as the body of an http POST
 //   2. Continue to pipe the writes until the pause between consecutive writes
-//      exceeds the IdleInterval, at which point we finish the request body
-//   3. Accept reads, reading the data from the response body until EOF is
-//      is reached or no read was attempted for more than IdleInterval.
-//   4. Go back to accepting writes (step 1)
-//   5. If no writes are received for more than PollInterval, issue an empty
-//      request in order to pick up any new data received by the proxy, start
-//      accepting reads (step 3)
+//      exceeds the IdleInterval, at which point we finish the request body. We
+//      do this because it is assumed that intervening proxies (e.g. CloudFlare
+//      CDN) do not allow streaming requests, so it is necessary to finish the
+//      request for data to get flushed to the destination server.
+//   3. After receiving a response to the POST request, return to step 1
+//
+// Read Channel:
+//
+//   1. Accept reads, issuing a new GET request if one is not already ongoing
+//   2. Process read by grabbing data from the response to the GET request
+//   3. Continue to accept reads, grabbing these from the response of the
+//      existing GET request
+//   4. Once the response to the GET request reaches EOF, return to step 1. This
+//      will happen because the proxy periodically closes responses to make sure
+//      intervening proxies don't time out.
+//   5. If a response is received with a special header indicating a true EOF
+//      from the destination server, return EOF to the reader
 //
 type Conn struct {
 	// Addr: the host:port of the destination server that we're trying to reach
