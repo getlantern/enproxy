@@ -19,8 +19,6 @@ var (
 	defaultWriteFlushTimeout = 15 * time.Millisecond
 	defaultReadFlushTimeout  = 35 * time.Millisecond
 	defaultIdleTimeout       = 70 * time.Second
-
-	emptyBuffer = []byte{}
 )
 
 // Conn is a net.Conn that tunnels its data via an httpconn.Proxy using HTTP
@@ -79,20 +77,20 @@ type Conn struct {
 	writeResponsesCh chan rwResponse // responses for writes
 	stopWriteCh      chan interface{}
 	doneWriting      bool
-	writeMutex       sync.RWMutex
+	writeMutex       sync.RWMutex // synchronizes access to doneWriting flag
 
 	/* Read processing */
 	readRequestsCh  chan []byte     // requests to read
 	readResponsesCh chan rwResponse // responses for reads
 	stopReadCh      chan interface{}
 	doneReading     bool
-	readMutex       sync.RWMutex
+	readMutex       sync.RWMutex // synchronizes access to doneReading flag
 
 	/* Request processing */
-	reqOutCh       chan *io.PipeReader // channel for next outgoing request body
-	stopReqCh      chan interface{}
+	requestOutCh   chan *io.PipeReader // channel for next outgoing request body
+	stopRequestCh  chan interface{}
 	doneRequesting bool
-	requestMutex   sync.RWMutex
+	requestMutex   sync.RWMutex // synchronizes access to doneRequesting flag
 
 	/* Fields for tracking activity/closed status */
 	lastActivityTime  time.Time    // time of last read or write
@@ -103,16 +101,6 @@ type Conn struct {
 	/* Fields for tracking current request and response */
 	reqBodyWriter *io.PipeWriter // pipe writer to current request body
 	resp          *http.Response // the current response being used to read data
-}
-
-type dialFunc func(addr string) (net.Conn, error)
-
-type newRequestFunc func(host string, method string, body io.Reader) (*http.Request, error)
-
-// rwResponse is a response to a read or write
-type rwResponse struct {
-	n   int
-	err error
 }
 
 // Config configures a Conn
@@ -131,6 +119,18 @@ type Config struct {
 	// to 70 seconds.  The high default value is selected to work well with XMPP
 	// traffic tunneled over enproxy by Lantern.
 	IdleTimeout time.Duration
+}
+
+// dialFunc is a function that dials an address (e.g. the upstream proxy)
+type dialFunc func(addr string) (net.Conn, error)
+
+// newRequestFunc is a function that builds a new request to the upstream proxy
+type newRequestFunc func(host string, method string, body io.Reader) (*http.Request, error)
+
+// rwResponse is a response to a read or write
+type rwResponse struct {
+	n   int
+	err error
 }
 
 // Write() implements the function from net.Conn
@@ -168,12 +168,13 @@ func (c *Conn) Close() error {
 	if !c.closed {
 		c.stopReadCh <- nil
 		c.stopWriteCh <- nil
-		c.stopReqCh <- nil
+		c.stopRequestCh <- nil
 		c.closed = true
 	}
 	return nil
 }
 
+// isClosed checks whether or not this connection is closed
 func (c *Conn) isClosed() bool {
 	c.closedMutex.RLock()
 	defer c.closedMutex.RUnlock()

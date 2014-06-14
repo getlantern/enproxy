@@ -51,8 +51,8 @@ func (c *Conn) makeChannels() {
 	c.readRequestsCh = make(chan []byte, 100)
 	c.readResponsesCh = make(chan rwResponse, 100)
 	c.stopReadCh = make(chan interface{}, 100)
-	c.reqOutCh = make(chan *io.PipeReader, 100)
-	c.stopReqCh = make(chan interface{}, 100)
+	c.requestOutCh = make(chan *io.PipeReader, 100)
+	c.stopRequestCh = make(chan interface{}, 100)
 }
 
 func (c *Conn) dialProxy() (proxyConn net.Conn, bufReader *bufio.Reader, err error) {

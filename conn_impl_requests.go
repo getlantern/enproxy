@@ -13,7 +13,7 @@ func (c *Conn) submitRequest(body *io.PipeReader) bool {
 	if c.doneRequesting {
 		return false
 	} else {
-		c.reqOutCh <- body
+		c.requestOutCh <- body
 		return true
 	}
 }
@@ -45,7 +45,7 @@ func (c *Conn) processRequests() {
 		}
 
 		select {
-		case reqBody, ok := <-c.reqOutCh:
+		case reqBody, ok := <-c.requestOutCh:
 			if !ok {
 				// done processing requests
 				return
@@ -62,7 +62,7 @@ func (c *Conn) processRequests() {
 				c.proxyHostCh <- proxyHost
 				first = false
 			}
-		case <-c.stopReqCh:
+		case <-c.stopRequestCh:
 			return
 		case <-time.After(c.Config.IdleTimeout):
 			if c.isIdle() {
@@ -78,12 +78,12 @@ func (c *Conn) cleanupAfterRequests(resp *http.Response) {
 	c.requestMutex.Unlock()
 	for {
 		select {
-		case <-c.reqOutCh:
+		case <-c.requestOutCh:
 			// do nothing
-		case <-c.stopReqCh:
+		case <-c.stopRequestCh:
 			// do nothing
 		default:
-			close(c.reqOutCh)
+			close(c.requestOutCh)
 			if resp != nil {
 				resp.Body.Close()
 			}
