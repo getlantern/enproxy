@@ -80,27 +80,7 @@ func (c *Conn) processWrites() {
 
 		select {
 		case b := <-c.writeRequestsCh:
-			// Consume writes as long as they keep coming in
-			if c.reqBodyWriter == nil {
-				// Lazily initialize our next request to the proxy
-				// Construct a pipe for piping data to proxy
-				reqBody, reqBodyWriter := io.Pipe()
-				c.reqBodyWriter = reqBodyWriter
-				if !c.submitRequest(reqBody) {
-					c.writeResponsesCh <- rwResponse{0, io.EOF}
-					return
-				}
-			}
-
-			// Write out data to the request body
-			n, err := c.reqBodyWriter.Write(b)
-			if n > 0 {
-				c.markActive()
-			}
-
-			// Let the caller know how it went
-			c.writeResponsesCh <- rwResponse{n, err}
-			if err != nil {
+			if !c.processWrite(b) {
 				return
 			}
 		case <-c.stopWriteCh:
@@ -286,6 +266,34 @@ func (c *Conn) processRequests() {
 			}
 		}
 	}
+}
+
+func (c *Conn) processWrite(b []byte) bool {
+	// Consume writes as long as they keep coming in
+	if c.reqBodyWriter == nil {
+		// Lazily initialize our next request to the proxy
+		// Construct a pipe for piping data to proxy
+		reqBody, reqBodyWriter := io.Pipe()
+		c.reqBodyWriter = reqBodyWriter
+		if !c.submitRequest(reqBody) {
+			c.writeResponsesCh <- rwResponse{0, io.EOF}
+			return false
+		}
+	}
+
+	// Write out data to the request body
+	n, err := c.reqBodyWriter.Write(b)
+	if n > 0 {
+		c.markActive()
+	}
+
+	// Let the caller know how it went
+	c.writeResponsesCh <- rwResponse{n, err}
+	if err != nil {
+		return false
+	}
+
+	return true
 }
 
 func (c *Conn) dialProxy() (proxyConn net.Conn, bufReader *bufio.Reader, err error) {
