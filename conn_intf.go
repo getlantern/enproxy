@@ -17,7 +17,7 @@ const (
 
 var (
 	defaultPollInterval = 50 * time.Millisecond
-	defaultIdleTimeout  = 70 * time.Second
+	defaultIdleTimeout  = 15 * time.Second
 
 	shortTimeout          = 35 * time.Millisecond
 	mediumTimeout         = 350 * time.Millisecond
