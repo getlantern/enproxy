@@ -26,7 +26,6 @@ func (c *Config) Intercept(resp http.ResponseWriter, req *http.Request) {
 		fmt.Fprintf(resp, "Unable to hijack connection: %s", err)
 	}
 	defer func() {
-		log.Println("Closing clientConn")
 		clientConn.Close()
 	}()
 
@@ -62,7 +61,15 @@ func pipeData(clientConn net.Conn, buffClientConn *bufio.ReadWriter, connOut *Co
 			log.Printf("Unable to respond OK: %s", err)
 			return
 		}
-		io.Copy(connOut, buffClientConn)
+		_, err = io.Copy(connOut, buffClientConn)
+		if err == nil {
+			// A nil error here means that we reached EOF on the clientConn,
+			// which means that it is closed.  We can immediately close connOut,
+			// which otherwise might hang around until it hits its IdleTimeout.
+			// Doing this aggressively helps keep CPU usage due to idling
+			// connections down.
+			connOut.Close()
+		}
 	}()
 
 	// Copy from proxy to client
