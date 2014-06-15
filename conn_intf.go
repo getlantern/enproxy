@@ -16,7 +16,7 @@ const (
 )
 
 var (
-	defaultWriteFlushTimeout = 15 * time.Millisecond
+	defaultWriteFlushTimeout = 35 * time.Millisecond
 	defaultReadFlushTimeout  = 35 * time.Millisecond
 	defaultIdleTimeout       = 70 * time.Second
 

@@ -60,14 +60,11 @@ func pipeData(clientConn net.Conn, buffClientConn *bufio.ReadWriter, connOut *Co
 			log.Printf("Unable to respond OK: %s", err)
 			return
 		}
-		_, err = io.Copy(connOut, buffClientConn)
-		clientEOF := err == nil
-		if clientEOF {
-			// We immediately close connOut, which otherwise might hang around until
-			// it hits its IdleTimeout. Doing this aggressively helps keep CPU usage
-			// due to idling connections down.
-			connOut.Close()
-		}
+		io.Copy(connOut, buffClientConn)
+		// We immediately close connOut, which otherwise might hang around until
+		// it hits its IdleTimeout. Doing this aggressively helps keep CPU usage
+		// due to idling connections down.
+		connOut.Close()
 	}()
 
 	// Copy from proxy to client
