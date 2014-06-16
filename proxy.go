@@ -176,7 +176,7 @@ func (p *Proxy) handleRead(resp http.ResponseWriter, req *http.Request, lc *lazy
 				connOut.Close()
 				return
 			}
-			bytesInBatch += n
+			bytesInBatch = bytesInBatch + n
 			haveRead = true
 		}
 
@@ -184,11 +184,12 @@ func (p *Proxy) handleRead(resp http.ResponseWriter, req *http.Request, lc *lazy
 		if readErr != nil {
 			switch e := readErr.(type) {
 			case net.Error:
-				if e.Timeout() {
-					// This means that we hit our FlushInterval, which is okay.
-					// If we've read some data, return a response to client, so
-					// that it gets the data sooner rather than later, and leave
-					// connOut open for future read requests.
+				if e.Timeout() && n == 0 {
+					// This means that we hit our FlushInterval without reading
+					// anything new.  If we've already read some data, return a
+					// response to client, so that it gets the data sooner
+					// rather than later, but leave connOut open for future read
+					// requests.
 					if haveRead {
 						return
 					}
