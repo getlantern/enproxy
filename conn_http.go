@@ -59,13 +59,7 @@ func pipeData(clientConn net.Conn, connOut *Conn, req *http.Request) {
 	// Start piping to proxy
 	go func() {
 		defer wg.Done()
-
 		io.Copy(connOut, clientConn)
-
-		// We immediately close connOut, which otherwise might hang around until
-		// it hits its IdleTimeout. Doing this aggressively helps keep CPU usage
-		// due to idling connections down.
-		connOut.Close()
 	}()
 
 	// Then start coyping from out to writer
