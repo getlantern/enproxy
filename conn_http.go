@@ -1,12 +1,12 @@
 package enproxy
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -20,70 +20,70 @@ func (c *Config) Intercept(resp http.ResponseWriter, req *http.Request) {
 	}
 
 	// Hijack underlying connection
-	clientConn, buffClientConn, err := resp.(http.Hijacker).Hijack()
+	clientConn, bufClientConn, err := resp.(http.Hijacker).Hijack()
 	if err != nil {
 		resp.WriteHeader(502)
 		fmt.Fprintf(resp, "Unable to hijack connection: %s", err)
 	}
 	defer clientConn.Close()
 
-	addr := hostIncludingPort(req)
-	c.proxied(resp, req, clientConn, buffClientConn, addr)
-}
+	addr := hostIncludingPort(req, 443)
 
-// proxied proxies via an enproxy.Proxy
-func (c *Config) proxied(resp http.ResponseWriter, req *http.Request, clientConn net.Conn, buffClientConn *bufio.ReadWriter, addr string) {
 	// Establish outbound connection
-	proxyConn := &Conn{
+	connOut := &Conn{
 		Addr:   addr,
 		Config: c,
 	}
-	proxyConn.Connect()
-	defer proxyConn.Close()
+	connOut.Connect()
+	defer connOut.Close()
 
-	pipeData(clientConn, buffClientConn, proxyConn, req)
+	// Respond OK and flush
+	err = respondOK(bufClientConn, req)
+	if err != nil {
+		log.Printf("Unable to respond OK: %s", err)
+		return
+	}
+	bufClientConn.Writer.Flush()
+
+	// Pipe data
+	pipeData(clientConn, connOut, req)
 }
 
 // pipeData pipes data between the client and proxy connections.  It's also
 // responsible for responding to the initial CONNECT request with a 200 OK.
-func pipeData(clientConn net.Conn, buffClientConn *bufio.ReadWriter, proxyConn *Conn, req *http.Request) {
+func pipeData(clientConn net.Conn, connOut *Conn, req *http.Request) {
 	// Pipe data between inbound and outbound connections
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(1)
 
-	// Respond OK and copy from client to proxy
+	// Start piping to proxy
 	go func() {
 		defer wg.Done()
-		err := respondOK(clientConn, req)
-		if err != nil {
-			log.Printf("Unable to respond OK: %s", err)
-			return
-		}
-		io.Copy(proxyConn, buffClientConn)
+		io.Copy(connOut, clientConn)
 	}()
 
-	// Copy from proxy to client
-	go func() {
-		defer wg.Done()
-		io.Copy(clientConn, proxyConn)
-	}()
+	// Then start coyping from out to writer
+	io.Copy(clientConn, connOut)
+
 	wg.Wait()
 }
 
-func respondOK(clientConn net.Conn, req *http.Request) error {
+func respondOK(writer io.Writer, req *http.Request) error {
 	defer req.Body.Close()
 	resp := &http.Response{
 		StatusCode: 200,
 		ProtoMajor: 1,
 		ProtoMinor: 1,
 	}
-	return resp.Write(clientConn)
+	return resp.Write(writer)
 }
 
-func hostIncludingPort(req *http.Request) string {
+// hostIncludingPort extracts the host:port from a request.  It fills in a
+// a default port if none was found in the request.
+func hostIncludingPort(req *http.Request, defaultPort int) string {
 	parts := strings.Split(req.Host, ":")
 	if len(parts) == 1 {
-		return req.Host + ":443"
+		return req.Host + ":" + strconv.Itoa(defaultPort)
 	} else {
 		return req.Host
 	}

@@ -6,14 +6,15 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 )
 
 const (
-	BAD_GATEWAY         = 502
-	DEFAULT_BUFFER_SIZE = 8096
+	BAD_GATEWAY = 502
+
+	DEFAULT_BYTES_BEFORE_FLUSH = 1024768
+	DEFAULT_READ_BUFFER_SIZE   = 65536
 )
 
 // Proxy is the server side to an enproxy.Client.  Proxy implements the
@@ -29,25 +30,27 @@ type Proxy struct {
 	// if this server was originally reached by e.g. DNS round robin.
 	Host string
 
-	// DefaultTimeoutProfile: default profile determining read timeouts based on
-	// bytes read
-	DefaultTimeoutProfile *TimeoutProfile
+	// FlushTimeout: how long to let reads idle before writing out a
+	// response to the client.  Defaults to 35 milliseconds.
+	FlushTimeout time.Duration
 
-	// TimeoutProfilesByPort: profiles determining read timeouts based on bytes
-	// read, with a different profile by port
-	TimeoutProfilesByPort map[string]*TimeoutProfile
+	// BytesBeforeFlush: how many bytes to read before flushing response to
+	// client.  Periodically flushing the response keeps the response buffer
+	// from getting too big when processing big downloads.
+	BytesBeforeFlush int
 
 	// IdleTimeout: how long to wait before closing an idle connection, defaults
 	// to 70 seconds
 	IdleTimeout time.Duration
 
-	// BufferSize: controls the size of the buffers used for copying data from
-	// outbound to inbound connections.  If given as 0, defaults to 8096 bytes.
-	BufferSize int
+	// ReadBufferSize: size of read buffer in bytes
+	ReadBufferSize int
 
-	connMap map[string]*lazyConn // map of outbound connections by their id
+	// connMap: map of outbound connections by their id
+	connMap map[string]*lazyConn
 
-	connMapMutex sync.Mutex // mutex for controlling access to connMap
+	// connMapMutex: synchronizes access to connMap
+	connMapMutex sync.Mutex
 }
 
 // Start() starts this proxy
@@ -57,30 +60,23 @@ func (p *Proxy) Start() {
 			return net.Dial("tcp", addr)
 		}
 	}
-	if p.DefaultTimeoutProfile == nil {
-		p.DefaultTimeoutProfile = defaultTimoutProfile
-	}
-	if p.TimeoutProfilesByPort == nil {
-		p.TimeoutProfilesByPort = make(map[string]*TimeoutProfile)
-	}
-	for port, defaultProfile := range defaultReadTimeoutProfilesByPort {
-		_, exists := p.TimeoutProfilesByPort[port]
-		if !exists {
-			// Merge default into map
-			p.TimeoutProfilesByPort[port] = defaultProfile
-		}
+	if p.FlushTimeout == 0 {
+		p.FlushTimeout = defaultReadFlushTimeout
 	}
 	if p.IdleTimeout == 0 {
 		p.IdleTimeout = defaultIdleTimeout
 	}
-	if p.BufferSize == 0 {
-		p.BufferSize = DEFAULT_BUFFER_SIZE
+	if p.ReadBufferSize == 0 {
+		p.ReadBufferSize = DEFAULT_READ_BUFFER_SIZE
+	}
+	if p.BytesBeforeFlush == 0 {
+		p.BytesBeforeFlush = DEFAULT_BYTES_BEFORE_FLUSH
 	}
 	p.connMap = make(map[string]*lazyConn)
 }
 
 // ListenAndServe: convenience function for quickly starting up a dedicated HTTP
-// server using this Proxy as its handler.
+// server using this Proxy as its handler
 func (p *Proxy) ListenAndServe(addr string) error {
 	p.Start()
 	httpServer := &http.Server{
@@ -92,17 +88,17 @@ func (p *Proxy) ListenAndServe(addr string) error {
 	return httpServer.ListenAndServe()
 }
 
-// ServeHTTP: implements the http.Handler interface.
+// ServeHTTP: implements the http.Handler interface
 func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
-	id := req.Header.Get(X_HTTPCONN_ID)
+	id := req.Header.Get(X_ENPROXY_ID)
 	if id == "" {
-		badGateway(resp, fmt.Sprintf("No id found in header %s", X_HTTPCONN_ID))
+		badGateway(resp, fmt.Sprintf("No id found in header %s", X_ENPROXY_ID))
 		return
 	}
 
-	addr := req.Header.Get(X_HTTPCONN_DEST_ADDR)
+	addr := req.Header.Get(X_ENPROXY_DEST_ADDR)
 	if addr == "" {
-		badGateway(resp, fmt.Sprintf("No address found in header %s", X_HTTPCONN_DEST_ADDR))
+		badGateway(resp, fmt.Sprintf("No address found in header %s", X_ENPROXY_DEST_ADDR))
 		return
 	}
 
@@ -113,41 +109,59 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	if req.Method == "POST" {
+		p.handleWrite(resp, req, connOut)
+	} else if req.Method == "GET" {
+		p.handleRead(resp, req, lc, connOut)
+	} else {
+		badGateway(resp, fmt.Sprintf("Method %s not supported", req.Method))
+	}
+}
+
+// handleWrite forwards the data from a POST to the outbound connection
+func (p *Proxy) handleWrite(resp http.ResponseWriter, req *http.Request, connOut net.Conn) {
 	// Pipe request
-	_, err = io.Copy(connOut, req.Body)
-	if err != nil {
+	_, err := io.Copy(connOut, req.Body)
+	if err != nil && err != io.EOF {
 		badGateway(resp, fmt.Sprintf("Unable to write to connOut: %s", err))
-		connOut.Close()
+		return
+	}
+	if p.Host != "" {
+		// Always feed this so clients will be guaranteed to reach
+		// this particular proxy even if they originally reached us
+		// through (e.g.) DNS round robin.
+		resp.Header().Set(X_ENPROXY_PROXY_HOST, p.Host)
+	}
+	resp.WriteHeader(200)
+}
+
+// handleRead streams the data from the outbound connection to the client as
+// a response body.  If no data is read for more than FlushTimeout, then the
+// response is finished and client needs to make a new GET request.
+func (p *Proxy) handleRead(resp http.ResponseWriter, req *http.Request, lc *lazyConn, connOut net.Conn) {
+	if lc.hitEOF {
+		// We hit EOF on the server while processing a previous request,
+		// immediately return EOF to the client
+		resp.Header().Set(X_ENPROXY_EOF, "true")
+		resp.WriteHeader(200)
 		return
 	}
 
-	// Get timeout profile based on addr
-	port := strings.Split(addr, ":")[1]
-	tp := p.TimeoutProfilesByPort[port]
-	if tp == nil {
-		tp = p.DefaultTimeoutProfile
-	}
-
-	// Write response
-	b := make([]byte, p.BufferSize)
+	b := make([]byte, p.ReadBufferSize)
 	first := true
+	start := time.Now()
+	haveRead := false
+	bytesInBatch := 0
 	for {
-		timeout := tp.GetTimeoutAfter(lc.bytesRead)
-		readDeadline := time.Now().Add(timeout)
+		readDeadline := time.Now().Add(p.FlushTimeout)
 		connOut.SetReadDeadline(readDeadline)
 
 		// Read
 		n, readErr := connOut.Read(b)
 		if first {
 			if readErr == io.EOF {
-				// Reached EOF
-				resp.Header().Set(X_HTTPCONN_EOF, "true")
-			}
-			if p.Host != "" {
-				// Always feed this so clients will be guaranteed to reach
-				// this particular proxy even if they originally reached us
-				// through (e.g.) DNS round robin.
-				resp.Header().Set(X_HTTPCONN_PROXY_HOST, p.Host)
+				// Reached EOF, tell client using a special header
+				resp.Header().Set(X_ENPROXY_EOF, "true")
 			}
 			// Always respond 200 OK
 			resp.WriteHeader(200)
@@ -158,33 +172,57 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 		if n > 0 {
 			_, writeErr := resp.Write(b[:n])
 			if writeErr != nil {
-				log.Printf("Write error: %s", err)
+				log.Printf("Error writing to response: %s", writeErr)
 				connOut.Close()
 				return
 			}
-			lc.bytesRead += n
+			bytesInBatch = bytesInBatch + n
+			haveRead = true
 		}
 
 		// Inspect readErr to decide whether or not to continue reading
 		if readErr != nil {
 			switch e := readErr.(type) {
 			case net.Error:
-				if e.Timeout() {
-					// This means that we hit our idleInterval, which is okay
-					// Return response to client, but leave connOut open
-					return
+				if e.Timeout() && n == 0 {
+					// This means that we hit our FlushInterval without reading
+					// anything new.  If we've already read some data, return a
+					// response to client, so that it gets the data sooner
+					// rather than later, but leave connOut open for future read
+					// requests.
+					if haveRead {
+						return
+					}
+
+					// If we didn't read yet, keep response open
 				}
 			default:
-				log.Printf("Unexpected read error: %s", readErr)
-				// Unexpected error, close outbound connection
-				connOut.Close()
+				if readErr == io.EOF {
+					lc.hitEOF = true
+				} else {
+					log.Printf("Unexpected error reading from upstream: %s", readErr)
+				}
 				return
 			}
+		}
+
+		if time.Now().Sub(start) > 10*time.Second {
+			// We've spent more than 10 seconds reading, return so that
+			// CloudFlare doesn't time us out
+			return
+		}
+
+		if bytesInBatch > p.BytesBeforeFlush {
+			// We've read a good chunk, flush the response to keep its buffer
+			// from getting too big.
+			resp.(http.Flusher).Flush()
+			bytesInBatch = 0
 		}
 	}
 }
 
-// getLazyConn gets the lazyConn corresponding to the given id and addr
+// getLazyConn gets the lazyConn corresponding to the given id and addr, or
+// creates a new one and saves it to connMap.
 func (p *Proxy) getLazyConn(id string, addr string) (l *lazyConn) {
 	p.connMapMutex.Lock()
 	defer p.connMapMutex.Unlock()
@@ -198,7 +236,5 @@ func (p *Proxy) getLazyConn(id string, addr string) (l *lazyConn) {
 
 func badGateway(resp http.ResponseWriter, msg string) {
 	log.Printf("Responding bad gateway: %s", msg)
-	resp.Header().Set("Connection", "close")
 	resp.WriteHeader(BAD_GATEWAY)
-	fmt.Fprintf(resp, "No id found in header %s", X_HTTPCONN_ID)
 }
