@@ -20,7 +20,7 @@ func (c *Config) Intercept(resp http.ResponseWriter, req *http.Request) {
 	}
 
 	// Hijack underlying connection
-	clientConn, bufClientConn, err := resp.(http.Hijacker).Hijack()
+	clientConn, _, err := resp.(http.Hijacker).Hijack()
 	if err != nil {
 		resp.WriteHeader(502)
 		fmt.Fprintf(resp, "Unable to hijack connection: %s", err)
@@ -37,14 +37,6 @@ func (c *Config) Intercept(resp http.ResponseWriter, req *http.Request) {
 	connOut.Connect()
 	defer connOut.Close()
 
-	// Respond OK and flush
-	err = respondOK(bufClientConn, req)
-	if err != nil {
-		log.Printf("Unable to respond OK: %s", err)
-		return
-	}
-	bufClientConn.Writer.Flush()
-
 	// Pipe data
 	pipeData(clientConn, connOut, req)
 }
@@ -52,7 +44,6 @@ func (c *Config) Intercept(resp http.ResponseWriter, req *http.Request) {
 // pipeData pipes data between the client and proxy connections.  It's also
 // responsible for responding to the initial CONNECT request with a 200 OK.
 func pipeData(clientConn net.Conn, connOut *Conn, req *http.Request) {
-	// Pipe data between inbound and outbound connections
 	var wg sync.WaitGroup
 	wg.Add(1)
 
@@ -61,6 +52,13 @@ func pipeData(clientConn net.Conn, connOut *Conn, req *http.Request) {
 		defer wg.Done()
 		io.Copy(connOut, clientConn)
 	}()
+
+	// Respond OK
+	err := respondOK(clientConn, req)
+	if err != nil {
+		log.Printf("Unable to respond OK: %s", err)
+		return
+	}
 
 	// Then start coyping from out to writer
 	io.Copy(clientConn, connOut)
