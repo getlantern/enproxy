@@ -102,7 +102,7 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	lc := p.getLazyConn(id, addr)
+	lc, isNew := p.getLazyConn(id, addr)
 	connOut, err := lc.get()
 	if err != nil {
 		badGateway(resp, fmt.Sprintf("Unable to get connOut: %s", err))
@@ -110,7 +110,7 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	}
 
 	if req.Method == "POST" {
-		p.handleWrite(resp, req, connOut)
+		p.handleWrite(resp, req, lc, connOut, isNew)
 	} else if req.Method == "GET" {
 		p.handleRead(resp, req, lc, connOut)
 	} else {
@@ -119,7 +119,7 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 }
 
 // handleWrite forwards the data from a POST to the outbound connection
-func (p *Proxy) handleWrite(resp http.ResponseWriter, req *http.Request, connOut net.Conn) {
+func (p *Proxy) handleWrite(resp http.ResponseWriter, req *http.Request, lc *lazyConn, connOut net.Conn, first bool) {
 	// Pipe request
 	_, err := io.Copy(connOut, req.Body)
 	if err != nil && err != io.EOF {
@@ -132,7 +132,12 @@ func (p *Proxy) handleWrite(resp http.ResponseWriter, req *http.Request, connOut
 		// through (e.g.) DNS round robin.
 		resp.Header().Set(X_ENPROXY_PROXY_HOST, p.Host)
 	}
-	resp.WriteHeader(200)
+	if first {
+		// On first write, immediately do some reading
+		p.handleRead(resp, req, lc, connOut)
+	} else {
+		resp.WriteHeader(200)
+	}
 }
 
 // handleRead streams the data from the outbound connection to the client as
@@ -223,13 +228,14 @@ func (p *Proxy) handleRead(resp http.ResponseWriter, req *http.Request, lc *lazy
 
 // getLazyConn gets the lazyConn corresponding to the given id and addr, or
 // creates a new one and saves it to connMap.
-func (p *Proxy) getLazyConn(id string, addr string) (l *lazyConn) {
+func (p *Proxy) getLazyConn(id string, addr string) (l *lazyConn, isNew bool) {
 	p.connMapMutex.Lock()
 	defer p.connMapMutex.Unlock()
 	l = p.connMap[id]
 	if l == nil {
 		l = p.newLazyConn(id, addr)
 		p.connMap[id] = l
+		isNew = true
 	}
 	return
 }

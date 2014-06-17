@@ -67,12 +67,14 @@ type Conn struct {
 	// Config: configuration of this Conn
 	Config *Config
 
-	// proxyHostCh: Self-reported FQDN of the proxy serving this connection.
+	// initialResponseCh: Self-reported FQDN of the proxy serving this connection
+	// plus initial response from proxy.
+	//
 	// This allows us to guarantee we reach the same server in subsequent
 	// requests, even if it was initially reached through a FQDN that may
 	// resolve to different IPs in different DNS lookups (e.g. as in DNS round
 	// robin).
-	proxyHostCh chan string
+	initialResponseCh chan hostWithResponse
 
 	// id: unique identifier for this connection. This is used by the Proxy to
 	// associate requests from this connection to the corresponding outbound
@@ -138,6 +140,11 @@ type newRequestFunc func(host string, method string, body io.Reader) (*http.Requ
 type rwResponse struct {
 	n   int
 	err error
+}
+
+type hostWithResponse struct {
+	proxyHost string
+	resp      *http.Response
 }
 
 // Write() implements the function from net.Conn

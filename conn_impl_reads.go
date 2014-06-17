@@ -38,12 +38,9 @@ func (c *Conn) processReads() {
 
 	// Wait for proxy host determined by first write request so that we know
 	// where to send read requests
-	proxyHost := <-c.proxyHostCh
-
-	resp, err = c.doRequest(proxyConn, bufReader, proxyHost, "GET", nil)
-	if err != nil {
-		return
-	}
+	initialResponse := <-c.initialResponseCh
+	proxyHost := initialResponse.proxyHost
+	resp = initialResponse.resp
 
 	for {
 		if c.isClosed() {

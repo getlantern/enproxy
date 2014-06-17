@@ -58,10 +58,13 @@ func (c *Conn) processRequests() {
 				// On our first request, find out what host we're actually
 				// talking to and remember that for future requests.
 				proxyHost = resp.Header.Get(X_ENPROXY_PROXY_HOST)
-				// Also post it to proxyHostCh so that the processReads()
-				// routine knows which proxyHost to use
-				c.proxyHostCh <- proxyHost
+				// Also post it to initialResponseCh so that the processReads()
+				// routine knows which proxyHost to use and gets the initial
+				// response data
+				c.initialResponseCh <- hostWithResponse{proxyHost, resp}
 				first = false
+			} else {
+				resp.Body.Close()
 			}
 		case <-c.stopRequestCh:
 			return

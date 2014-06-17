@@ -39,7 +39,7 @@ func (c *Conn) initDefaults() {
 }
 
 func (c *Conn) makeChannels() {
-	c.proxyHostCh = make(chan string)
+	c.initialResponseCh = make(chan hostWithResponse)
 	c.writeRequestsCh = make(chan []byte, channelDepth)
 	c.writeResponsesCh = make(chan rwResponse, channelDepth)
 	c.stopWriteCh = make(chan interface{}, channelDepth)
