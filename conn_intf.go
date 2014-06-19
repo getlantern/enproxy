@@ -17,7 +17,10 @@ const (
 
 var (
 	defaultPollInterval = 50 * time.Millisecond
-	defaultIdleTimeout  = 15 * time.Second
+	defaultIdleTimeout  = 70 * time.Second
+	// 70 seconds seems to play nicely with Chrome. Setting defaultIdleTimeout
+	// too low seems to cause a lot of ERR_CONNECTION_CLOSED errors in Chrome.
+	// We still get these with a larger idle timeout, but a lot less frequently.
 
 	shortTimeout          = 35 * time.Millisecond
 	mediumTimeout         = 350 * time.Millisecond
