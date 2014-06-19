@@ -175,6 +175,10 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 					return
 				}
 			default:
+				if e == io.EOF {
+					// EOF OK, just stop
+					return
+				}
 				log.Printf("Unexpected read error: %s", readErr)
 				// Unexpected error, close outbound connection
 				connOut.Close()
