@@ -37,7 +37,7 @@ func (c *Conn) initDefaults() {
 		c.Config.IdleInterval = defaultIdleInterval
 	}
 	if c.Config.IdleTimeout == 0 {
-		c.Config.IdleTimeout = defaultIdleTimeout
+		c.Config.IdleTimeout = defaultIdleTimeoutClient
 	}
 }
 

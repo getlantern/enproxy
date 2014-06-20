@@ -16,11 +16,13 @@ const (
 )
 
 var (
-	defaultIdleInterval = 35 * time.Millisecond
-	defaultIdleTimeout  = 70 * time.Second
-	// 70 seconds seems to play nicely with Chrome. Setting defaultIdleTimeout
-	// too low seems to cause a lot of ERR_CONNECTION_CLOSED errors in Chrome.
-	// We still get these with a larger idle timeout, but a lot less frequently.
+	defaultIdleInterval      = 35 * time.Millisecond
+	defaultIdleTimeoutClient = 30 * time.Second
+	defaultIdleTimeoutServer = 70 * time.Second
+	// The server idle timeout has to be greater than the client idle timeout,
+	// because if a client tries to use a server-side connection that has been
+	// closed due to idling, Chrome (in particular Gmail) stops functioning
+	// correctly.
 
 	emptyBuffer = []byte{}
 )

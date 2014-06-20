@@ -56,7 +56,7 @@ func (p *Proxy) Start() {
 		p.IdleInterval = defaultIdleInterval
 	}
 	if p.IdleTimeout == 0 {
-		p.IdleTimeout = defaultIdleTimeout
+		p.IdleTimeout = defaultIdleTimeoutServer
 	}
 	if p.BufferSize == 0 {
 		p.BufferSize = DEFAULT_BUFFER_SIZE
