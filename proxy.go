@@ -132,7 +132,7 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	b := make([]byte, p.BufferSize)
 	first := true
 	for {
-		timeout := 50 * time.Millisecond //tp.GetTimeoutAfter(lc.bytesRead)
+		timeout := tp.GetTimeoutAfter(lc.bytesRead)
 		readDeadline := time.Now().Add(timeout)
 		connOut.SetReadDeadline(readDeadline)
 

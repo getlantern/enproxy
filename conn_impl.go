@@ -187,7 +187,7 @@ func (c *Conn) processReadsAndWrites() {
 			return
 		}
 
-		timeout := 35 * time.Millisecond
+		timeout := tp.GetTimeoutAfter(c.bytesWritten)
 		select {
 		case b := <-c.writeRequestsCh:
 			c.markActive()
