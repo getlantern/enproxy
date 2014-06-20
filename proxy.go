@@ -148,9 +148,11 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 			case net.Error:
 				if e.Timeout() {
 					// This means that we hit our idleInterval, which is okay
-					// Return response to client to keep it from having to wait
-					// for this data.
-					return
+					if n == 0 {
+						// We didn't make any progress, so return response to client
+						// to keep it from having to wait.
+						return
+					}
 				}
 			default:
 				if e == io.EOF {
