@@ -60,12 +60,13 @@ func (c *Conn) dialProxy() (proxyConn net.Conn, bufReader *bufio.Reader, err err
 	return
 }
 
-func (c *Conn) doRequest(proxyConn net.Conn, bufReader *bufio.Reader, host string, method string, body io.ReadCloser) (resp *http.Response, err error) {
-	req, err := c.Config.NewRequest(host, method, body)
+func (c *Conn) doRequest(proxyConn net.Conn, bufReader *bufio.Reader, host string, op string, body io.ReadCloser) (resp *http.Response, err error) {
+	req, err := c.Config.NewRequest(host, "POST", body)
 	if err != nil {
 		err = fmt.Errorf("Unable to construct request to proxy: %s", err)
 		return
 	}
+	req.Header.Set(X_ENPROXY_OP, op)
 	// Always send our connection id
 	req.Header.Set(X_ENPROXY_ID, c.id)
 	// Always send the address that we're trying to reach

@@ -13,6 +13,10 @@ const (
 	X_ENPROXY_DEST_ADDR  = "X-Enproxy-Dest-Addr"
 	X_ENPROXY_EOF        = "X-Enproxy-EOF"
 	X_ENPROXY_PROXY_HOST = "X-Enproxy-Proxy-Host"
+	X_ENPROXY_OP         = "X-Enproxy-Op"
+
+	OP_WRITE = "write"
+	OP_READ  = "read"
 )
 
 var (

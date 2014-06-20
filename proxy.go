@@ -109,12 +109,13 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if req.Method == "POST" {
+	op := req.Header.Get(X_ENPROXY_OP)
+	if op == OP_WRITE {
 		p.handleWrite(resp, req, lc, connOut, isNew)
-	} else if req.Method == "GET" {
+	} else if op == OP_READ {
 		p.handleRead(resp, req, lc, connOut)
 	} else {
-		badGateway(resp, fmt.Sprintf("Method %s not supported", req.Method))
+		badGateway(resp, fmt.Sprintf("Op %s not supported", op))
 	}
 }
 

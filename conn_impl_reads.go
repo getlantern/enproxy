@@ -51,7 +51,7 @@ func (c *Conn) processReads() {
 		case b := <-c.readRequestsCh:
 			if resp == nil {
 				// Old response finished, start a new one
-				resp, err = c.doRequest(proxyConn, bufReader, proxyHost, "GET", nil)
+				resp, err = c.doRequest(proxyConn, bufReader, proxyHost, OP_READ, nil)
 				if err != nil {
 					c.readResponsesCh <- rwResponse{0, fmt.Errorf("Unable to do GET: %s", err)}
 					return

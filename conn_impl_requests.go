@@ -49,7 +49,7 @@ func (c *Conn) processRequests() {
 
 		select {
 		case reqBody := <-c.requestOutCh:
-			resp, err = c.doRequest(proxyConn, bufReader, proxyHost, "POST", reqBody)
+			resp, err = c.doRequest(proxyConn, bufReader, proxyHost, OP_WRITE, reqBody)
 			if err != nil {
 				return
 			}
