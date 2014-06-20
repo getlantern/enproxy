@@ -111,9 +111,11 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 
 	op := req.Header.Get(X_ENPROXY_OP)
 	if op == OP_WRITE {
+		log.Printf("Handling write for: %s", addr)
 		p.handleWrite(resp, req, lc, connOut, isNew)
 	} else if op == OP_READ {
-		p.handleRead(resp, req, lc, connOut)
+		log.Printf("Handling read for: %s", addr)
+		p.handleRead(resp, req, lc, connOut, true)
 	} else {
 		badGateway(resp, fmt.Sprintf("Op %s not supported", op))
 	}
@@ -135,7 +137,7 @@ func (p *Proxy) handleWrite(resp http.ResponseWriter, req *http.Request, lc *laz
 	}
 	if first {
 		// On first write, immediately do some reading
-		p.handleRead(resp, req, lc, connOut)
+		p.handleRead(resp, req, lc, connOut, false)
 	} else {
 		resp.WriteHeader(200)
 	}
@@ -144,7 +146,7 @@ func (p *Proxy) handleWrite(resp http.ResponseWriter, req *http.Request, lc *laz
 // handleRead streams the data from the outbound connection to the client as
 // a response body.  If no data is read for more than FlushTimeout, then the
 // response is finished and client needs to make a new GET request.
-func (p *Proxy) handleRead(resp http.ResponseWriter, req *http.Request, lc *lazyConn, connOut net.Conn) {
+func (p *Proxy) handleRead(resp http.ResponseWriter, req *http.Request, lc *lazyConn, connOut net.Conn, waitForData bool) {
 	if lc.hitEOF {
 		// We hit EOF on the server while processing a previous request,
 		// immediately return EOF to the client
@@ -191,13 +193,10 @@ func (p *Proxy) handleRead(resp http.ResponseWriter, req *http.Request, lc *lazy
 			switch e := readErr.(type) {
 			case net.Error:
 				if e.Timeout() && n == 0 {
-					// This means that we hit our FlushInterval without reading
-					// anything new.  If we've already read some data, return a
-					// response to client, so that it gets the data sooner
-					// rather than later, but leave connOut open for future read
-					// requests.
-					if haveRead {
-						return
+					if n == 0 {
+						if !waitForData || haveRead {
+							return
+						}
 					}
 
 					// If we didn't read yet, keep response open

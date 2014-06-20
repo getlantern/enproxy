@@ -71,6 +71,7 @@ func (c *Conn) doRequest(proxyConn net.Conn, bufReader *bufio.Reader, host strin
 	req.Header.Set(X_ENPROXY_ID, c.id)
 	// Always send the address that we're trying to reach
 	req.Header.Set(X_ENPROXY_DEST_ADDR, c.Addr)
+	req.Header.Set("Content-type", "application/octet-stream")
 
 	// Important - we set WriteDeadline and ReadDeadline separately instead of
 	// calling SetDeadline because we will later change the read and write
