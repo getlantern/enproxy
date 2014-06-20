@@ -6,7 +6,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 )
@@ -29,13 +28,9 @@ type Proxy struct {
 	// if this server was originally reached by e.g. DNS round robin.
 	Host string
 
-	// DefaultTimeoutProfile: default profile determining read timeouts based on
-	// bytes read
-	DefaultTimeoutProfile *TimeoutProfile
-
-	// TimeoutProfilesByPort: profiles determining read timeouts based on bytes
-	// read, with a different profile by port
-	TimeoutProfilesByPort map[string]*TimeoutProfile
+	// IdleInterval: how long to wait for a read or write before switching
+	// mode to write or read
+	IdleInterval time.Duration
 
 	// IdleTimeout: how long to wait before closing an idle connection, defaults
 	// to 70 seconds
@@ -57,18 +52,8 @@ func (p *Proxy) Start() {
 			return net.Dial("tcp", addr)
 		}
 	}
-	if p.DefaultTimeoutProfile == nil {
-		p.DefaultTimeoutProfile = defaultTimoutProfile
-	}
-	if p.TimeoutProfilesByPort == nil {
-		p.TimeoutProfilesByPort = make(map[string]*TimeoutProfile)
-	}
-	for port, defaultProfile := range defaultReadTimeoutProfilesByPort {
-		_, exists := p.TimeoutProfilesByPort[port]
-		if !exists {
-			// Merge default into map
-			p.TimeoutProfilesByPort[port] = defaultProfile
-		}
+	if p.IdleInterval == 0 {
+		p.IdleInterval = defaultIdleInterval
 	}
 	if p.IdleTimeout == 0 {
 		p.IdleTimeout = defaultIdleTimeout
@@ -121,19 +106,11 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Get timeout profile based on addr
-	port := strings.Split(addr, ":")[1]
-	tp := p.TimeoutProfilesByPort[port]
-	if tp == nil {
-		tp = p.DefaultTimeoutProfile
-	}
-
 	// Write response
 	b := make([]byte, p.BufferSize)
 	first := true
 	for {
-		timeout := tp.GetTimeoutAfter(lc.bytesRead)
-		readDeadline := time.Now().Add(timeout)
+		readDeadline := time.Now().Add(p.IdleInterval)
 		connOut.SetReadDeadline(readDeadline)
 
 		// Read
@@ -162,7 +139,7 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 				connOut.Close()
 				return
 			}
-			lc.bytesRead += n
+			lc.bytesRead = lc.bytesRead + n
 		}
 
 		// Inspect readErr to decide whether or not to continue reading
@@ -171,7 +148,8 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 			case net.Error:
 				if e.Timeout() {
 					// This means that we hit our idleInterval, which is okay
-					// Return response to client, but leave connOut open
+					// Return response to client to keep it from having to wait
+					// for this data.
 					return
 				}
 			default:

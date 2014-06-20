@@ -33,21 +33,8 @@ func (c *Conn) Connect() (err error) {
 }
 
 func (c *Conn) initDefaults() {
-	if c.Config.PollInterval == 0 {
-		c.Config.PollInterval = defaultPollInterval
-	}
-	if c.Config.DefaultTimeoutProfile == nil {
-		c.Config.DefaultTimeoutProfile = defaultTimoutProfile
-	}
-	if c.Config.TimeoutProfilesByPort == nil {
-		c.Config.TimeoutProfilesByPort = make(map[string]*TimeoutProfile)
-	}
-	for port, defaultProfile := range defaultWriteTimeoutProfilesByPort {
-		_, exists := c.Config.TimeoutProfilesByPort[port]
-		if !exists {
-			// Merge default into map
-			c.Config.TimeoutProfilesByPort[port] = defaultProfile
-		}
+	if c.Config.IdleInterval == 0 {
+		c.Config.IdleInterval = defaultIdleInterval
 	}
 	if c.Config.IdleTimeout == 0 {
 		c.Config.IdleTimeout = defaultIdleTimeout
@@ -176,18 +163,11 @@ func (c *Conn) processReadsAndWrites() {
 		c.drainAndCloseChannels()
 	}()
 
-	port := strings.Split(c.Addr, ":")[1]
-	tp := c.Config.TimeoutProfilesByPort[port]
-	if tp == nil {
-		tp = c.Config.DefaultTimeoutProfile
-	}
-
 	for {
 		if c.isClosed() {
 			return
 		}
 
-		timeout := tp.GetTimeoutAfter(c.bytesWritten)
 		select {
 		case b := <-c.writeRequestsCh:
 			c.markActive()
@@ -196,12 +176,12 @@ func (c *Conn) processReadsAndWrites() {
 				// Problem writing, stop processing
 				return
 			}
-		case <-time.After(timeout):
+		case <-time.After(c.Config.IdleInterval):
 			if c.isIdle() {
 				// No activity for more than IdleTimeout, stop processing
 				return
 			}
-			// We waited more than PollInterval for a write, proceed to reading
+			// We waited more than IdleInterval for a write, proceed to reading
 			if !c.processReads() {
 				// Problem processing reads, stop processing
 				return
@@ -271,6 +251,9 @@ func (c *Conn) processReads() (ok bool) {
 				}
 				return true
 			}
+		case <-time.After(c.Config.IdleInterval):
+			// No read in IdleInterval, switch back to writing
+			return true
 		case <-c.closeCh:
 			c.closed = true
 			return true
@@ -323,18 +306,10 @@ func (c *Conn) readNextResponse() (err error, responseFinished bool) {
 		// Stop writing to request body to stop current request to server
 		c.reqBodyWriter.Close()
 	} else {
-		// Request was nil, meaning that we never wrote anything
-		reachedPollInterval := time.Now().Sub(c.lastRequestTime) > c.Config.PollInterval
-		if reachedPollInterval {
-			// Write an empty request to poll for any additional data
-			err = c.post(nil)
-			if err != nil {
-				err = fmt.Errorf("Unable to write empty request: %s", err)
-				return
-			}
-		} else {
-			// Nothing written, haven't hit poll interval yet, nothing to do
-			responseFinished = true
+		// Write an empty request to poll for any additional data
+		err = c.post(nil)
+		if err != nil {
+			err = fmt.Errorf("Unable to write empty request: %s", err)
 			return
 		}
 	}
