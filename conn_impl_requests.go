@@ -1,7 +1,6 @@
 package enproxy
 
 import (
-	"io"
 	"log"
 	"net/http"
 	"time"
@@ -10,7 +9,7 @@ import (
 // submitRequest submits a request to the processRequests goroutine, returning
 // true if the request was accepted or false if requests are no longer being
 // accepted
-func (c *Conn) submitRequest(body *io.PipeReader) bool {
+func (c *Conn) submitRequest(body []byte) bool {
 	c.requestMutex.RLock()
 	defer c.requestMutex.RUnlock()
 	if c.doneRequesting {

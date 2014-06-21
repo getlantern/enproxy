@@ -64,7 +64,7 @@ func (p *Proxy) Start() {
 		p.FlushTimeout = defaultReadFlushTimeout
 	}
 	if p.IdleTimeout == 0 {
-		p.IdleTimeout = defaultIdleTimeout
+		p.IdleTimeout = defaultIdleTimeoutServer
 	}
 	if p.ReadBufferSize == 0 {
 		p.ReadBufferSize = DEFAULT_READ_BUFFER_SIZE
@@ -111,10 +111,8 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 
 	op := req.Header.Get(X_ENPROXY_OP)
 	if op == OP_WRITE {
-		log.Printf("Handling write for: %s", addr)
 		p.handleWrite(resp, req, lc, connOut, isNew)
 	} else if op == OP_READ {
-		log.Printf("Handling read for: %s", addr)
 		p.handleRead(resp, req, lc, connOut, true)
 	} else {
 		badGateway(resp, fmt.Sprintf("Op %s not supported", op))
@@ -241,6 +239,5 @@ func (p *Proxy) getLazyConn(id string, addr string) (l *lazyConn, isNew bool) {
 }
 
 func badGateway(resp http.ResponseWriter, msg string) {
-	log.Printf("Responding bad gateway: %s", msg)
 	resp.WriteHeader(BAD_GATEWAY)
 }

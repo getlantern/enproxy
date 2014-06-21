@@ -47,11 +47,11 @@ func (c *Conn) processWrites() {
 				// Connection is idle, stop writing
 				return
 			}
-			// We waited more than FlushTimeout for a write, close our request
-			// body writer so that it can get flushed to the server
-			if c.reqBodyWriter != nil {
-				c.reqBodyWriter.Close()
-				c.reqBodyWriter = nil
+			// We waited more than FlushTimeout for a write, finish our request
+			if c.currentBody != nil {
+				if !c.finishBody() {
+					return
+				}
 			}
 		}
 	}
@@ -61,29 +61,70 @@ func (c *Conn) processWrites() {
 // to the proxy when necessary.
 func (c *Conn) processWrite(b []byte) bool {
 	// Consume writes as long as they keep coming in
-	if c.reqBodyWriter == nil {
-		// Lazily initialize our next request to the proxy
-		// Construct a pipe for piping data to proxy
-		reqBody, reqBodyWriter := io.Pipe()
-		c.reqBodyWriter = reqBodyWriter
-		if !c.submitRequest(reqBody) {
-			c.writeResponsesCh <- rwResponse{0, io.EOF}
+	bytesWritten := 0
+
+	// Copy from b into outbound body
+	for {
+		bytesRemaining := bodySize - c.currentBytesRead
+		bytesToCopy := len(b)
+		if bytesToCopy == 0 {
+			break
+		} else {
+			c.markActive()
+			if c.currentBody == nil {
+				c.initBody()
+			}
+			dst := c.currentBody[c.currentBytesRead:]
+			if bytesToCopy <= bytesRemaining {
+				// Copy the entire buffer to the destination
+				copy(dst, b)
+				c.currentBytesRead = c.currentBytesRead + bytesToCopy
+				bytesWritten = bytesWritten + bytesToCopy
+				break
+			} else {
+				// Copy as much as we can from the buffer to the destination
+				copy(dst, b[:bytesRemaining])
+				// Set buffer to remaining bytes
+				b = b[bytesRemaining:]
+				c.currentBytesRead = c.currentBytesRead + bytesRemaining
+				bytesWritten = bytesWritten + bytesRemaining
+				// Write the body
+				if !c.finishBody() {
+					return false
+				}
+			}
+		}
+	}
+
+	if bodySize == c.currentBytesRead {
+		// We've filled the body, write it
+		if !c.finishBody() {
 			return false
 		}
 	}
 
-	// Write out data to the request body
-	n, err := c.reqBodyWriter.Write(b)
-	if n > 0 {
-		c.markActive()
-	}
-
 	// Let the caller know how it went
-	c.writeResponsesCh <- rwResponse{n, err}
-	if err != nil {
+	c.writeResponsesCh <- rwResponse{bytesWritten, nil}
+	return true
+}
+
+func (c *Conn) initBody() {
+	c.currentBody = make([]byte, bodySize)
+	c.currentBytesRead = 0
+}
+
+func (c *Conn) finishBody() bool {
+	body := c.currentBody
+	if c.currentBytesRead < len(c.currentBody) {
+		body = c.currentBody[:c.currentBytesRead]
+	}
+	success := c.submitRequest(body)
+	c.currentBody = nil
+	c.currentBytesRead = 0
+	if !success {
+		c.writeResponsesCh <- rwResponse{0, io.EOF}
 		return false
 	}
-
 	return true
 }
 

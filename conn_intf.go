@@ -22,12 +22,15 @@ const (
 var (
 	defaultWriteFlushTimeout = 35 * time.Millisecond
 	defaultReadFlushTimeout  = 35 * time.Millisecond
-	defaultIdleTimeout       = 70 * time.Second
+	defaultIdleTimeoutClient = 30 * time.Second
+	defaultIdleTimeoutServer = 70 * time.Second
 
 	// channelDepth: controls depth of processing channels.  Doesn't need to be
 	// particularly big, as it's just used to prevent deadlocks in operations
 	// that involve multiple channels.
 	channelDepth = 100
+
+	bodySize = 65536 // size of buffer used for request bodies
 )
 
 // Conn is a net.Conn that tunnels its data via an httpconn.Proxy using HTTP
@@ -91,6 +94,8 @@ type Conn struct {
 	stopWriteCh      chan interface{}
 	doneWriting      bool
 	writeMutex       sync.RWMutex // synchronizes access to doneWriting flag
+	currentBody      []byte
+	currentBytesRead int
 
 	/* Read processing */
 	readRequestsCh  chan []byte     // requests to read
@@ -100,7 +105,7 @@ type Conn struct {
 	readMutex       sync.RWMutex // synchronizes access to doneReading flag
 
 	/* Request processing */
-	requestOutCh   chan *io.PipeReader // channel for next outgoing request body
+	requestOutCh   chan []byte // channel for next outgoing request body
 	stopRequestCh  chan interface{}
 	doneRequesting bool
 	requestMutex   sync.RWMutex // synchronizes access to doneRequesting flag

@@ -2,6 +2,7 @@ package enproxy
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"log"
@@ -34,19 +35,19 @@ func (c *Conn) initDefaults() {
 		c.Config.FlushTimeout = defaultWriteFlushTimeout
 	}
 	if c.Config.IdleTimeout == 0 {
-		c.Config.IdleTimeout = defaultIdleTimeout
+		c.Config.IdleTimeout = defaultIdleTimeoutClient
 	}
 }
 
 func (c *Conn) makeChannels() {
 	c.initialResponseCh = make(chan hostWithResponse)
-	c.writeRequestsCh = make(chan []byte, channelDepth)
+	c.writeRequestsCh = make(chan []byte, 10) // don't make this too big, otherwise request body buffers will build up
 	c.writeResponsesCh = make(chan rwResponse, channelDepth)
 	c.stopWriteCh = make(chan interface{}, channelDepth)
 	c.readRequestsCh = make(chan []byte, channelDepth)
 	c.readResponsesCh = make(chan rwResponse, channelDepth)
 	c.stopReadCh = make(chan interface{}, channelDepth)
-	c.requestOutCh = make(chan *io.PipeReader, channelDepth)
+	c.requestOutCh = make(chan []byte, channelDepth)
 	c.stopRequestCh = make(chan interface{}, channelDepth)
 }
 
@@ -60,7 +61,11 @@ func (c *Conn) dialProxy() (proxyConn net.Conn, bufReader *bufio.Reader, err err
 	return
 }
 
-func (c *Conn) doRequest(proxyConn net.Conn, bufReader *bufio.Reader, host string, op string, body io.ReadCloser) (resp *http.Response, err error) {
+func (c *Conn) doRequest(proxyConn net.Conn, bufReader *bufio.Reader, host string, op string, bodyBytes []byte) (resp *http.Response, err error) {
+	var body io.Reader
+	if bodyBytes != nil {
+		body = &closer{bytes.NewReader(bodyBytes)}
+	}
 	req, err := c.Config.NewRequest(host, "POST", body)
 	if err != nil {
 		err = fmt.Errorf("Unable to construct request to proxy: %s", err)
@@ -72,6 +77,12 @@ func (c *Conn) doRequest(proxyConn net.Conn, bufReader *bufio.Reader, host strin
 	// Always send the address that we're trying to reach
 	req.Header.Set(X_ENPROXY_DEST_ADDR, c.Addr)
 	req.Header.Set("Content-type", "application/octet-stream")
+	if bodyBytes != nil {
+		// Always force identity encoding to appeas CDNs like Fastly that can't
+		// handle chunked encoding on requests
+		req.TransferEncoding = []string{"identity"}
+		req.ContentLength = int64(len(bodyBytes))
+	}
 
 	// Important - we set WriteDeadline and ReadDeadline separately instead of
 	// calling SetDeadline because we will later change the read and write
@@ -85,7 +96,7 @@ func (c *Conn) doRequest(proxyConn net.Conn, bufReader *bufio.Reader, host strin
 		return
 	}
 
-	// Don't spend more than IdleTimeout trying to read from request
+	// Don't spend more than IdleTimeout trying to read from response
 	proxyConn.SetReadDeadline(time.Now().Add(c.Config.IdleTimeout))
 	resp, err = http.ReadResponse(bufReader, req)
 	if err != nil {
@@ -123,15 +134,15 @@ func BadGateway(w io.Writer, msg string) {
 		StatusCode: 502,
 		ProtoMajor: 1,
 		ProtoMinor: 1,
-		Body:       &closeableStringReader{strings.NewReader(msg)},
+		Body:       &closer{strings.NewReader(msg)},
 	}
 	resp.Write(w)
 }
 
-type closeableStringReader struct {
-	*strings.Reader
+type closer struct {
+	io.Reader
 }
 
-func (r *closeableStringReader) Close() error {
+func (r *closer) Close() error {
 	return nil
 }
