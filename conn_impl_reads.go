@@ -93,6 +93,7 @@ func (c *Conn) processReads() {
 			return
 		case <-time.After(c.Config.IdleTimeout):
 			if c.isIdle() {
+				log.Printf("Idled %s", c.Addr)
 				return
 			}
 		}

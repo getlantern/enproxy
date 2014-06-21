@@ -158,6 +158,7 @@ func (p *Proxy) handleRead(resp http.ResponseWriter, req *http.Request, lc *lazy
 	start := time.Now()
 	haveRead := false
 	bytesInBatch := 0
+	lastReadTime := time.Now()
 	for {
 		readDeadline := time.Now().Add(p.FlushTimeout)
 		connOut.SetReadDeadline(readDeadline)
@@ -184,6 +185,7 @@ func (p *Proxy) handleRead(resp http.ResponseWriter, req *http.Request, lc *lazy
 			}
 			bytesInBatch = bytesInBatch + n
 			haveRead = true
+			lastReadTime = time.Now()
 		}
 
 		// Inspect readErr to decide whether or not to continue reading
@@ -209,8 +211,8 @@ func (p *Proxy) handleRead(resp http.ResponseWriter, req *http.Request, lc *lazy
 			}
 		}
 
-		if time.Now().Sub(start) > 10*time.Second {
-			// We've spent more than 10 seconds reading, return so that
+		if time.Now().Sub(lastReadTime) > 10*time.Second {
+			// We've spent more than 10 seconds without reading, return so that
 			// CloudFlare doesn't time us out
 			return
 		}

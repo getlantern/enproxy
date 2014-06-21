@@ -41,7 +41,7 @@ func (c *Conn) initDefaults() {
 
 func (c *Conn) makeChannels() {
 	c.initialResponseCh = make(chan hostWithResponse)
-	c.writeRequestsCh = make(chan []byte, 10) // don't make this too big, otherwise request body buffers will build up
+	c.writeRequestsCh = make(chan []byte)
 	c.writeResponsesCh = make(chan rwResponse, channelDepth)
 	c.stopWriteCh = make(chan interface{}, channelDepth)
 	c.readRequestsCh = make(chan []byte, channelDepth)
