@@ -155,7 +155,6 @@ func (p *Proxy) handleRead(resp http.ResponseWriter, req *http.Request, lc *lazy
 
 	b := make([]byte, p.ReadBufferSize)
 	first := true
-	start := time.Now()
 	haveRead := false
 	bytesInBatch := 0
 	lastReadTime := time.Now()
@@ -177,29 +176,38 @@ func (p *Proxy) handleRead(resp http.ResponseWriter, req *http.Request, lc *lazy
 
 		// Write if necessary
 		if n > 0 {
+			haveRead = true
+			lastReadTime = time.Now()
+			bytesInBatch = bytesInBatch + n
 			_, writeErr := resp.Write(b[:n])
 			if writeErr != nil {
 				log.Printf("Error writing to response: %s", writeErr)
 				connOut.Close()
 				return
 			}
-			bytesInBatch = bytesInBatch + n
-			haveRead = true
-			lastReadTime = time.Now()
 		}
 
 		// Inspect readErr to decide whether or not to continue reading
 		if readErr != nil {
 			switch e := readErr.(type) {
 			case net.Error:
-				if e.Timeout() && n == 0 {
+				if e.Timeout() {
 					if n == 0 {
-						if !waitForData || haveRead {
+						// We didn't read anything, might be time to return to
+						// client
+						if !waitForData {
+							// We're not supposed to wait for data, so just
+							// return right away
+							return
+						}
+						if haveRead {
+							// We've read some data, so return right away so
+							// that client doesn't have to wait
 							return
 						}
 					}
-
-					// If we didn't read yet, keep response open
+				} else {
+					return
 				}
 			default:
 				if readErr == io.EOF {
