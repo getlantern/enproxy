@@ -149,6 +149,8 @@ func (p *Proxy) handleRead(resp http.ResponseWriter, req *http.Request, lc *lazy
 		// We hit EOF on the server while processing a previous request,
 		// immediately return EOF to the client
 		resp.Header().Set(X_ENPROXY_EOF, "true")
+		// Echo back connection id (for debugging purposes)
+		resp.Header().Set(X_ENPROXY_ID, lc.id)
 		resp.WriteHeader(200)
 		return
 	}
@@ -169,6 +171,8 @@ func (p *Proxy) handleRead(resp http.ResponseWriter, req *http.Request, lc *lazy
 				// Reached EOF, tell client using a special header
 				resp.Header().Set(X_ENPROXY_EOF, "true")
 			}
+			// Echo back connection id (for debugging purposes)
+			resp.Header().Set(X_ENPROXY_ID, lc.id)
 			// Always respond 200 OK
 			resp.WriteHeader(200)
 			first = false

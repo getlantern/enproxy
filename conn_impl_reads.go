@@ -58,7 +58,11 @@ func (c *Conn) processReads() {
 		select {
 		case b := <-c.readRequestsCh:
 			if resp == nil {
-				// Old response finished, start a new one
+				// Old response finished
+				if c.isIdle() {
+					// We're idle, don't bother reading again
+					return
+				}
 
 				// First, redial the proxy if necessary
 				proxyConn, bufReader, err := c.redialProxyIfNecessary(proxyConn, bufReader)
