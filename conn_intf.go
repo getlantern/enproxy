@@ -2,6 +2,7 @@ package enproxy
 
 import (
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -105,10 +106,11 @@ type Conn struct {
 	readMutex       sync.RWMutex // synchronizes access to doneReading flag
 
 	/* Request processing */
-	requestOutCh   chan []byte // channel for next outgoing request body
-	stopRequestCh  chan interface{}
-	doneRequesting bool
-	requestMutex   sync.RWMutex // synchronizes access to doneRequesting flag
+	requestOutCh      chan []byte // channel for next outgoing request body
+	requestFinishedCh chan interface{}
+	stopRequestCh     chan interface{}
+	doneRequesting    bool
+	requestMutex      sync.RWMutex // synchronizes access to doneRequesting flag
 
 	/* Fields for tracking activity/closed status */
 	lastActivityTime  time.Time    // time of last read or write
@@ -158,6 +160,14 @@ type hostWithResponse struct {
 
 // Write() implements the function from net.Conn
 func (c *Conn) Write(b []byte) (n int, err error) {
+	start := time.Now()
+	defer func() {
+		diff := time.Now().Sub(start)
+		if diff > 10*time.Second {
+			log.Printf("Write took: %s", diff)
+		}
+	}()
+
 	if c.submitWrite(b) {
 		res, ok := <-c.writeResponsesCh
 		if !ok {
@@ -172,15 +182,29 @@ func (c *Conn) Write(b []byte) (n int, err error) {
 
 // Read() implements the function from net.Conn
 func (c *Conn) Read(b []byte) (n int, err error) {
+	start := time.Now()
+	defer func() {
+		diff := time.Now().Sub(start)
+		if diff > 5*time.Second {
+			log.Printf("Read took %s for %d bytes", diff, n)
+		}
+	}()
+
 	if c.submitRead(b) {
 		res, ok := <-c.readResponsesCh
 		if !ok {
-			return 0, io.EOF
+			n = 0
+			err = io.EOF
+			return
 		} else {
-			return res.n, res.err
+			n = res.n
+			err = res.err
+			return
 		}
 	} else {
-		return 0, io.EOF
+		n = 0
+		err = io.EOF
+		return
 	}
 }
 

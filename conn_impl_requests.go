@@ -49,6 +49,7 @@ func (c *Conn) processRequests() {
 		select {
 		case reqBody := <-c.requestOutCh:
 			resp, err = c.doRequest(proxyConn, bufReader, proxyHost, OP_WRITE, reqBody)
+			c.requestFinishedCh <- nil
 			if err != nil {
 				return
 			}

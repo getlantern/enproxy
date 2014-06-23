@@ -121,6 +121,9 @@ func (c *Conn) finishBody() bool {
 		body = c.currentBody[:c.currentBytesRead]
 	}
 	success := c.submitRequest(body)
+	if success {
+		<-c.requestFinishedCh
+	}
 	c.currentBody = nil
 	c.currentBytesRead = 0
 	if !success {

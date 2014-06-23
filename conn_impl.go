@@ -40,14 +40,23 @@ func (c *Conn) initDefaults() {
 }
 
 func (c *Conn) makeChannels() {
-	c.initialResponseCh = make(chan hostWithResponse)
+	// initialResponseCh needs to have a little room so that writes after the
+	// first don't wait on the first read
+	c.initialResponseCh = make(chan hostWithResponse, 2)
+
+	// writeRequestsCh is a blocking queue to ensure that slow writing back-
+	// pressures to the writer
 	c.writeRequestsCh = make(chan []byte)
+
+	// TODO: figure out if these channels really need to be as deep as they are
+	// right now
 	c.writeResponsesCh = make(chan rwResponse, channelDepth)
 	c.stopWriteCh = make(chan interface{}, channelDepth)
 	c.readRequestsCh = make(chan []byte, channelDepth)
 	c.readResponsesCh = make(chan rwResponse, channelDepth)
 	c.stopReadCh = make(chan interface{}, channelDepth)
 	c.requestOutCh = make(chan []byte, channelDepth)
+	c.requestFinishedCh = make(chan interface{}, channelDepth)
 	c.stopRequestCh = make(chan interface{}, channelDepth)
 }
 
@@ -82,6 +91,8 @@ func (c *Conn) doRequest(proxyConn net.Conn, bufReader *bufio.Reader, host strin
 		// handle chunked encoding on requests
 		req.TransferEncoding = []string{"identity"}
 		req.ContentLength = int64(len(bodyBytes))
+	} else {
+		req.ContentLength = 0
 	}
 
 	// Important - we set WriteDeadline and ReadDeadline separately instead of
