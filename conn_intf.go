@@ -106,7 +106,7 @@ type Conn struct {
 
 	/* Request processing */
 	requestOutCh      chan []byte // channel for next outgoing request body
-	requestFinishedCh chan interface{}
+	requestFinishedCh chan error
 	stopRequestCh     chan interface{}
 	doneRequesting    bool
 	requestMutex      sync.RWMutex // synchronizes access to doneRequesting flag
@@ -155,6 +155,7 @@ type rwResponse struct {
 type hostWithResponse struct {
 	proxyHost string
 	resp      *http.Response
+	err       error
 }
 
 // Write() implements the function from net.Conn

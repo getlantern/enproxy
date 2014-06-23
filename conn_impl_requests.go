@@ -1,6 +1,7 @@
 package enproxy
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -63,9 +64,13 @@ func (c *Conn) processRequests() {
 
 			// Then issue new request
 			resp, err = c.doRequest(proxyConn, bufReader, proxyHost, OP_WRITE, reqBody)
-			c.requestFinishedCh <- nil
+			c.requestFinishedCh <- err
 			if err != nil {
-				log.Printf("Unable to issue write request: %s", err)
+				err = fmt.Errorf("Unable to issue write request: %s", err)
+				log.Println(err.Error())
+				if first {
+					c.initialResponseCh <- hostWithResponse{"", nil, err}
+				}
 				return
 			}
 
@@ -76,7 +81,7 @@ func (c *Conn) processRequests() {
 				// Also post it to initialResponseCh so that the processReads()
 				// routine knows which proxyHost to use and gets the initial
 				// response data
-				c.initialResponseCh <- hostWithResponse{proxyHost, resp}
+				c.initialResponseCh <- hostWithResponse{proxyHost, resp, nil}
 				first = false
 			} else {
 				resp.Body.Close()

@@ -56,7 +56,7 @@ func (c *Conn) makeChannels() {
 	c.readResponsesCh = make(chan rwResponse, channelDepth)
 	c.stopReadCh = make(chan interface{}, channelDepth)
 	c.requestOutCh = make(chan []byte, channelDepth)
-	c.requestFinishedCh = make(chan interface{}, channelDepth)
+	c.requestFinishedCh = make(chan error, channelDepth)
 	c.stopRequestCh = make(chan interface{}, channelDepth)
 }
 

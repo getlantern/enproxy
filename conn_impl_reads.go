@@ -45,6 +45,9 @@ func (c *Conn) processReads() {
 	// Wait for proxy host determined by first write request so that we know
 	// where to send read requests.
 	initialResponse := <-c.initialResponseCh
+	if initialResponse.err != nil {
+		return
+	}
 	proxyHost := initialResponse.proxyHost
 	// Also grab the initial response body to save an extra round trip for the
 	// first read
@@ -73,8 +76,9 @@ func (c *Conn) processReads() {
 				// Then, issue a new request
 				resp, err = c.doRequest(proxyConn, bufReader, proxyHost, OP_READ, nil)
 				if err != nil {
-					log.Printf("Unable to issue read request: %s", err)
-					c.readResponsesCh <- rwResponse{0, fmt.Errorf("Unable to do GET: %s", err)}
+					err = fmt.Errorf("Unable to issue read request: %s", err)
+					log.Println(err.Error())
+					c.readResponsesCh <- rwResponse{0, err}
 					return
 				}
 			}
