@@ -219,7 +219,7 @@ func (p *Proxy) handleRead(resp http.ResponseWriter, req *http.Request, lc *lazy
 			}
 		}
 
-		if time.Now().Sub(lastReadTime) > 2*time.Second {
+		if time.Now().Sub(lastReadTime) > 10*time.Second {
 			// We've spent more than 10 seconds without reading, return so that
 			// CloudFlare doesn't time us out
 			return
