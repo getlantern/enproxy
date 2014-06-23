@@ -2,7 +2,6 @@ package enproxy
 
 import (
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -160,14 +159,6 @@ type hostWithResponse struct {
 
 // Write() implements the function from net.Conn
 func (c *Conn) Write(b []byte) (n int, err error) {
-	start := time.Now()
-	defer func() {
-		diff := time.Now().Sub(start)
-		if diff > 10*time.Second {
-			log.Printf("Write took: %s", diff)
-		}
-	}()
-
 	if c.submitWrite(b) {
 		res, ok := <-c.writeResponsesCh
 		if !ok {
@@ -182,14 +173,6 @@ func (c *Conn) Write(b []byte) (n int, err error) {
 
 // Read() implements the function from net.Conn
 func (c *Conn) Read(b []byte) (n int, err error) {
-	start := time.Now()
-	defer func() {
-		diff := time.Now().Sub(start)
-		if diff > 5*time.Second {
-			log.Printf("Read took %s for %d bytes", diff, n)
-		}
-	}()
-
 	if c.submitRead(b) {
 		res, ok := <-c.readResponsesCh
 		if !ok {

@@ -36,7 +36,13 @@ func (c *Conn) processRequests() {
 		log.Printf("Unable to dial proxy for POSTing request: %s", err)
 		return
 	}
-	defer proxyConn.Close()
+	defer func() {
+		// If there's a proxyConn at the time that processRequests() exits,
+		// close it.
+		if proxyConn != nil {
+			proxyConn.Close()
+		}
+	}()
 
 	var proxyHost string
 	first := true
@@ -48,9 +54,18 @@ func (c *Conn) processRequests() {
 
 		select {
 		case reqBody := <-c.requestOutCh:
+			// Redial the proxy if necessary
+			proxyConn, bufReader, err := c.redialProxyIfNecessary(proxyConn, bufReader)
+			if err != nil {
+				log.Printf("Unable to redial proxy: %s", err)
+				return
+			}
+
+			// Then issue new request
 			resp, err = c.doRequest(proxyConn, bufReader, proxyHost, OP_WRITE, reqBody)
 			c.requestFinishedCh <- nil
 			if err != nil {
+				log.Printf("Unable to issue write request: %s", err)
 				return
 			}
 
@@ -70,7 +85,6 @@ func (c *Conn) processRequests() {
 			return
 		case <-time.After(c.Config.IdleTimeout):
 			if c.isIdle() {
-				log.Printf("Idled %s", c.Addr)
 				return
 			}
 		}

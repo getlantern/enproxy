@@ -70,6 +70,33 @@ func (c *Conn) dialProxy() (proxyConn net.Conn, bufReader *bufio.Reader, err err
 	return
 }
 
+// redialProxyIfNecessary redials the proxy if the original connection got
+// closed somehow.  This will happen especially when using an intermediary proxy
+// like a CDN, which will sometimes aggressively close idle connections.
+func (c *Conn) redialProxyIfNecessary(origProxyConn net.Conn, origBufReader *bufio.Reader) (proxyConn net.Conn, bufReader *bufio.Reader, err error) {
+	// Default to keeping the same connection
+	proxyConn = origProxyConn
+	bufReader = origBufReader
+
+	// Make sure connection is still open and redial if necessary
+	origProxyConn.SetReadDeadline(time.Now().Add(5 * time.Millisecond))
+	_, err = origBufReader.Peek(1)
+	origProxyConn.SetReadDeadline(time.Time{})
+	if err == io.EOF {
+		// Close original connection
+		origProxyConn.Close()
+		// Dial again
+		proxyConn, bufReader, err = c.dialProxy()
+		if err != nil {
+			log.Println("Unable to redial proxy: %s", err)
+			return
+		}
+	} else {
+		err = nil
+	}
+	return
+}
+
 func (c *Conn) doRequest(proxyConn net.Conn, bufReader *bufio.Reader, host string, op string, bodyBytes []byte) (resp *http.Response, err error) {
 	var body io.Reader
 	if bodyBytes != nil {

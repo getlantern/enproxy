@@ -34,12 +34,20 @@ func (c *Conn) processReads() {
 		log.Printf("Unable to dial proxy to GET data: %s", err)
 		return
 	}
-	defer proxyConn.Close()
+	defer func() {
+		// If there's a proxyConn at the time that processReads() exits, close
+		// it.
+		if proxyConn != nil {
+			proxyConn.Close()
+		}
+	}()
 
 	// Wait for proxy host determined by first write request so that we know
-	// where to send read requests
+	// where to send read requests.
 	initialResponse := <-c.initialResponseCh
 	proxyHost := initialResponse.proxyHost
+	// Also grab the initial response body to save an extra round trip for the
+	// first read
 	resp = initialResponse.resp
 
 	for {
@@ -51,8 +59,17 @@ func (c *Conn) processReads() {
 		case b := <-c.readRequestsCh:
 			if resp == nil {
 				// Old response finished, start a new one
+
+				// First, redial the proxy if necessary
+				proxyConn, bufReader, err := c.redialProxyIfNecessary(proxyConn, bufReader)
+				if err != nil {
+					c.readResponsesCh <- rwResponse{0, fmt.Errorf("Unable to redial proxy: %s", err)}
+				}
+
+				// Then, issue a new request
 				resp, err = c.doRequest(proxyConn, bufReader, proxyHost, OP_READ, nil)
 				if err != nil {
+					log.Printf("Unable to issue read request: %s", err)
 					c.readResponsesCh <- rwResponse{0, fmt.Errorf("Unable to do GET: %s", err)}
 					return
 				}
@@ -93,7 +110,6 @@ func (c *Conn) processReads() {
 			return
 		case <-time.After(c.Config.IdleTimeout):
 			if c.isIdle() {
-				log.Printf("Idled %s", c.Addr)
 				return
 			}
 		}
