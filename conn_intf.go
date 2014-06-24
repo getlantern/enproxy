@@ -25,10 +25,10 @@ var (
 	defaultIdleTimeoutClient = 30 * time.Second // if this is set too low, Lantern's login sequence runs into trouble
 	defaultIdleTimeoutServer = 70 * time.Second
 
-	// channelDepth: controls depth of processing channels.  Doesn't need to be
-	// particularly big, as it's just used to prevent deadlocks in operations
-	// that involve multiple channels.
-	channelDepth = 100
+	// closeChannelDepth: controls depth of channels used for close processing.
+	// Doesn't need to be particularly big, as it's just used to prevent
+	// deadlocks on multiple calls to Close().
+	closeChannelDepth = 20
 
 	bodySize = 65536 // size of buffer used for request bodies
 )
@@ -177,18 +177,12 @@ func (c *Conn) Read(b []byte) (n int, err error) {
 	if c.submitRead(b) {
 		res, ok := <-c.readResponsesCh
 		if !ok {
-			n = 0
-			err = io.EOF
-			return
+			return 0, io.EOF
 		} else {
-			n = res.n
-			err = res.err
-			return
+			return res.n, res.err
 		}
 	} else {
-		n = 0
-		err = io.EOF
-		return
+		return 0, io.EOF
 	}
 }
 

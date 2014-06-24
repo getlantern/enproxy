@@ -8,19 +8,6 @@ import (
 	"time"
 )
 
-// submitRead submits a read to the processReads goroutine, returning true if
-// the read was accepted or false if reads are no longer being accepted
-func (c *Conn) submitRead(b []byte) bool {
-	c.readMutex.RLock()
-	defer c.readMutex.RUnlock()
-	if c.doneReading {
-		return false
-	} else {
-		c.readRequestsCh <- b
-		return true
-	}
-}
-
 // processReads processes read requests by polling the proxy with GET requests
 // and reading the data from the resulting response body
 func (c *Conn) processReads() {
@@ -64,6 +51,7 @@ func (c *Conn) processReads() {
 				// Old response finished
 				if c.isIdle() {
 					// We're idle, don't bother reading again
+					c.readResponsesCh <- rwResponse{0, io.EOF}
 					return
 				}
 
@@ -126,10 +114,20 @@ func (c *Conn) processReads() {
 	return
 }
 
+// submitRead submits a read to the processReads goroutine, returning true if
+// the read was accepted or false if reads are no longer being accepted
+func (c *Conn) submitRead(b []byte) bool {
+	c.readMutex.RLock()
+	defer c.readMutex.RUnlock()
+	if c.doneReading {
+		return false
+	} else {
+		c.readRequestsCh <- b
+		return true
+	}
+}
+
 func (c *Conn) cleanupAfterReads(resp *http.Response) {
-	c.readMutex.Lock()
-	c.doneReading = true
-	c.readMutex.Unlock()
 	for {
 		select {
 		case <-c.readRequestsCh:
@@ -137,6 +135,9 @@ func (c *Conn) cleanupAfterReads(resp *http.Response) {
 		case <-c.stopReadCh:
 			// do nothing
 		default:
+			c.readMutex.Lock()
+			c.doneReading = true
+			c.readMutex.Unlock()
 			close(c.readRequestsCh)
 			if resp != nil {
 				resp.Body.Close()

@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 )
 
 // Intercept intercepts a CONNECT request, hijacks the underlying client
@@ -44,14 +43,8 @@ func (c *Config) Intercept(resp http.ResponseWriter, req *http.Request) {
 // pipeData pipes data between the client and proxy connections.  It's also
 // responsible for responding to the initial CONNECT request with a 200 OK.
 func pipeData(clientConn net.Conn, connOut *Conn, req *http.Request) {
-	var wg sync.WaitGroup
-	wg.Add(1)
-
 	// Start piping to proxy
-	go func() {
-		defer wg.Done()
-		io.Copy(connOut, clientConn)
-	}()
+	go io.Copy(connOut, clientConn)
 
 	// Respond OK
 	err := respondOK(clientConn, req)
@@ -62,8 +55,6 @@ func pipeData(clientConn net.Conn, connOut *Conn, req *http.Request) {
 
 	// Then start coyping from out to writer
 	io.Copy(clientConn, connOut)
-
-	wg.Wait()
 }
 
 func respondOK(writer io.Writer, req *http.Request) error {

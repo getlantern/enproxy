@@ -2,24 +2,11 @@ package enproxy
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"time"
 )
-
-// submitRequest submits a request to the processRequests goroutine, returning
-// true if the request was accepted or false if requests are no longer being
-// accepted
-func (c *Conn) submitRequest(body []byte) bool {
-	c.requestMutex.RLock()
-	defer c.requestMutex.RUnlock()
-	if c.doneRequesting {
-		return false
-	} else {
-		c.requestOutCh <- body
-		return true
-	}
-}
 
 // processRequests handles writing outbound requests to the proxy.  Note - this
 // is not pipelined, because we cannot be sure that intervening proxies will
@@ -58,7 +45,11 @@ func (c *Conn) processRequests() {
 			// Redial the proxy if necessary
 			proxyConn, bufReader, err := c.redialProxyIfNecessary(proxyConn, bufReader)
 			if err != nil {
-				log.Printf("Unable to redial proxy: %s", err)
+				err = fmt.Errorf("Unable to redial proxy: %s", err)
+				log.Println(err.Error())
+				if first {
+					c.initialResponseCh <- hostWithResponse{"", nil, err}
+				}
 				return
 			}
 
@@ -96,17 +87,31 @@ func (c *Conn) processRequests() {
 	}
 }
 
+// submitRequest submits a request to the processRequests goroutine, returning
+// true if the request was accepted or false if requests are no longer being
+// accepted
+func (c *Conn) submitRequest(body []byte) bool {
+	c.requestMutex.RLock()
+	defer c.requestMutex.RUnlock()
+	if c.doneRequesting {
+		return false
+	} else {
+		c.requestOutCh <- body
+		return true
+	}
+}
+
 func (c *Conn) cleanupAfterRequests(resp *http.Response) {
-	c.requestMutex.Lock()
-	c.doneRequesting = true
-	c.requestMutex.Unlock()
 	for {
 		select {
 		case <-c.requestOutCh:
-			// do nothing
+			c.requestFinishedCh <- io.EOF
 		case <-c.stopRequestCh:
 			// do nothing
 		default:
+			c.requestMutex.Lock()
+			c.doneRequesting = true
+			c.requestMutex.Unlock()
 			close(c.requestOutCh)
 			if resp != nil {
 				resp.Body.Close()

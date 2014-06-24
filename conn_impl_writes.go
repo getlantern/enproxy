@@ -5,19 +5,6 @@ import (
 	"time"
 )
 
-// submitWrite submits a write to the processWrites goroutine, returning true if
-// the write was accepted or false if writes are no longer being accepted
-func (c *Conn) submitWrite(b []byte) bool {
-	c.writeMutex.RLock()
-	defer c.writeMutex.RUnlock()
-	if c.doneWriting {
-		return false
-	} else {
-		c.writeRequestsCh <- b
-		return true
-	}
-}
-
 // processWrites processes write requests by writing them to the body of a POST
 // request.  Note - processWrites doesn't actually send the POST requests,
 // that's handled by the processRequests goroutine.  The reason that we do this
@@ -134,10 +121,20 @@ func (c *Conn) finishBody() bool {
 	return true
 }
 
+// submitWrite submits a write to the processWrites goroutine, returning true if
+// the write was accepted or false if writes are no longer being accepted
+func (c *Conn) submitWrite(b []byte) bool {
+	c.writeMutex.RLock()
+	defer c.writeMutex.RUnlock()
+	if c.doneWriting {
+		return false
+	} else {
+		c.writeRequestsCh <- b
+		return true
+	}
+}
+
 func (c *Conn) cleanupAfterWrites() {
-	c.writeMutex.Lock()
-	c.doneWriting = true
-	c.writeMutex.Unlock()
 	for {
 		select {
 		case <-c.writeRequestsCh:
@@ -145,6 +142,9 @@ func (c *Conn) cleanupAfterWrites() {
 		case <-c.stopWriteCh:
 			// do nothing
 		default:
+			c.writeMutex.Lock()
+			c.doneWriting = true
+			c.writeMutex.Unlock()
 			close(c.writeRequestsCh)
 			return
 		}

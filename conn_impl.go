@@ -40,24 +40,16 @@ func (c *Conn) initDefaults() {
 }
 
 func (c *Conn) makeChannels() {
-	// initialResponseCh needs to have a little room so that writes after the
-	// first don't wait on the first read
-	c.initialResponseCh = make(chan hostWithResponse, 2)
-
-	// writeRequestsCh is a blocking queue to ensure that slow writing back-
-	// pressures to the writer
+	c.initialResponseCh = make(chan hostWithResponse)
 	c.writeRequestsCh = make(chan []byte)
-
-	// TODO: figure out if these channels really need to be as deep as they are
-	// right now
-	c.writeResponsesCh = make(chan rwResponse, channelDepth)
-	c.stopWriteCh = make(chan interface{}, channelDepth)
-	c.readRequestsCh = make(chan []byte, channelDepth)
-	c.readResponsesCh = make(chan rwResponse, channelDepth)
-	c.stopReadCh = make(chan interface{}, channelDepth)
-	c.requestOutCh = make(chan []byte, channelDepth)
-	c.requestFinishedCh = make(chan error, channelDepth)
-	c.stopRequestCh = make(chan interface{}, channelDepth)
+	c.writeResponsesCh = make(chan rwResponse)
+	c.stopWriteCh = make(chan interface{}, closeChannelDepth)
+	c.readRequestsCh = make(chan []byte)
+	c.readResponsesCh = make(chan rwResponse)
+	c.stopReadCh = make(chan interface{}, closeChannelDepth)
+	c.requestOutCh = make(chan []byte)
+	c.requestFinishedCh = make(chan error)
+	c.stopRequestCh = make(chan interface{}, closeChannelDepth)
 }
 
 func (c *Conn) dialProxy() (proxyConn net.Conn, bufReader *bufio.Reader, err error) {
