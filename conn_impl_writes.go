@@ -44,8 +44,9 @@ func (c *Conn) processWrites() {
 	}
 }
 
-// processWrite processes a single write request, lazily starting a new POST
-// to the proxy when necessary.
+// processWrite processes a single write request, encapsulated in the body of a
+// POST request to the proxy.  If b is bigger than bodySize (65K), then this
+// will result in multiple POST requests.
 func (c *Conn) processWrite(b []byte) bool {
 	// Consume writes as long as they keep coming in
 	bytesWritten := 0
