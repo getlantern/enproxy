@@ -90,6 +90,12 @@ func (p *Proxy) ListenAndServe(addr string) error {
 
 // ServeHTTP: implements the http.Handler interface
 func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
+	if req.Method == "HEAD" {
+		// Just respond OK to HEAD requests (used for health checks)
+		resp.WriteHeader(200)
+		return
+	}
+
 	id := req.Header.Get(X_ENPROXY_ID)
 	if id == "" {
 		badGateway(resp, fmt.Sprintf("No id found in header %s", X_ENPROXY_ID))
