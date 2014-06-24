@@ -71,6 +71,7 @@ func (c *Conn) processReads() {
 				proxyConn, bufReader, err := c.redialProxyIfNecessary(proxyConn, bufReader)
 				if err != nil {
 					c.readResponsesCh <- rwResponse{0, fmt.Errorf("Unable to redial proxy: %s", err)}
+					return
 				}
 
 				// Then, issue a new request
