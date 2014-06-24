@@ -22,7 +22,7 @@ const (
 var (
 	defaultWriteFlushTimeout = 35 * time.Millisecond
 	defaultReadFlushTimeout  = 35 * time.Millisecond
-	defaultIdleTimeoutClient = 15 * time.Second
+	defaultIdleTimeoutClient = 30 * time.Second // if this is set too low, Lantern's login sequence runs into trouble
 	defaultIdleTimeoutServer = 70 * time.Second
 
 	// channelDepth: controls depth of processing channels.  Doesn't need to be
