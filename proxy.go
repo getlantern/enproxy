@@ -261,5 +261,6 @@ func (p *Proxy) getLazyConn(id string, addr string) (l *lazyConn, isNew bool) {
 }
 
 func badGateway(resp http.ResponseWriter, msg string) {
+	log.Printf("Responding Bad Gateway: %s", msg)
 	resp.WriteHeader(BAD_GATEWAY)
 }
