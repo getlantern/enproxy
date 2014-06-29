@@ -9,22 +9,28 @@ import (
 )
 
 const (
-	X_HTTPCONN_ID         = "X-HTTPConn-Id"
-	X_HTTPCONN_DEST_ADDR  = "X-HTTPConn-Dest-Addr"
-	X_HTTPCONN_EOF        = "X-HTTPConn-EOF"
-	X_HTTPCONN_PROXY_HOST = "X-HTTPConn-Proxy-Host"
+	X_ENPROXY_ID         = "X-Enproxy-Id"
+	X_ENPROXY_DEST_ADDR  = "X-Enproxy-Dest-Addr"
+	X_ENPROXY_EOF        = "X-Enproxy-EOF"
+	X_ENPROXY_PROXY_HOST = "X-Enproxy-Proxy-Host"
+	X_ENPROXY_OP         = "X-Enproxy-Op"
+
+	OP_WRITE = "write"
+	OP_READ  = "read"
 )
 
 var (
-	defaultIdleInterval      = 35 * time.Millisecond
-	defaultIdleTimeoutClient = 30 * time.Second
+	defaultWriteFlushTimeout = 35 * time.Millisecond
+	defaultReadFlushTimeout  = 35 * time.Millisecond
+	defaultIdleTimeoutClient = 30 * time.Second // if this is set too low, Lantern's login sequence runs into trouble
 	defaultIdleTimeoutServer = 70 * time.Second
-	// The server idle timeout has to be greater than the client idle timeout,
-	// because if a client tries to use a server-side connection that has been
-	// closed due to idling, Chrome (in particular Gmail) stops functioning
-	// correctly.
 
-	emptyBuffer = []byte{}
+	// closeChannelDepth: controls depth of channels used for close processing.
+	// Doesn't need to be particularly big, as it's just used to prevent
+	// deadlocks on multiple calls to Close().
+	closeChannelDepth = 20
+
+	bodySize = 65536 // size of buffer used for request bodies
 )
 
 // Conn is a net.Conn that tunnels its data via an httpconn.Proxy using HTTP
@@ -33,19 +39,33 @@ var (
 // the one used by meek, but different in that data is not encoded as JSON.
 // https://trac.torproject.org/projects/tor/wiki/doc/AChildsGardenOfPluggableTransports#Undertheencryption.
 //
-// enproxy doesn't support request pipelining, so new requests are only sent
-// after previous responses have been read.
+// enproxy uses two parallel channels to send and receive data.  One channel
+// handles writing data out by making sequential POST requests to the server
+// which encapsulate the outbound data in their request bodies, while the other
+// channel handles reading data by making GET requests and grabbing the data
+// encapsulated in the response bodies.
 //
-// The basics flow is as follows:
-//   1. Accept writes, piping these to the proxy as the body of an http request
+// Write Channel:
+//
+//   1. Accept writes, piping these to the proxy as the body of an http POST
 //   2. Continue to pipe the writes until the pause between consecutive writes
-//      exceeds the IdleInterval, at which point we finish the request body
-//   3. Accept reads, reading the data from the response body until EOF is
-//      is reached or no read was attempted for more than IdleInterval.
-//   4. Go back to accepting writes (step 1)
-//   5. If no writes are received for more than PollInterval, issue an empty
-//      request in order to pick up any new data received by the proxy, start
-//      accepting reads (step 3)
+//      exceeds the IdleInterval, at which point we finish the request body. We
+//      do this because it is assumed that intervening proxies (e.g. CloudFlare
+//      CDN) do not allow streaming requests, so it is necessary to finish the
+//      request for data to get flushed to the destination server.
+//   3. After receiving a response to the POST request, return to step 1
+//
+// Read Channel:
+//
+//   1. Accept reads, issuing a new GET request if one is not already ongoing
+//   2. Process read by grabbing data from the response to the GET request
+//   3. Continue to accept reads, grabbing these from the response of the
+//      existing GET request
+//   4. Once the response to the GET request reaches EOF, return to step 1. This
+//      will happen because the proxy periodically closes responses to make sure
+//      intervening proxies don't time out.
+//   5. If a response is received with a special header indicating a true EOF
+//      from the destination server, return EOF to the reader
 //
 type Conn struct {
 	// Addr: the host:port of the destination server that we're trying to reach
@@ -54,46 +74,52 @@ type Conn struct {
 	// Config: configuration of this Conn
 	Config *Config
 
-	// Self-reported FQDN of the proxy serving this connection.  This allows
-	// us to guarantee we reach the same server in subsequent requests, even
-	// if it was initially reached through a FQDN that may resolve to
-	// different IPs in different DNS lookups (e.g. as in DNS round robin).
-	proxyHost string
+	// initialResponseCh: Self-reported FQDN of the proxy serving this connection
+	// plus initial response from proxy.
+	//
+	// This allows us to guarantee we reach the same server in subsequent
+	// requests, even if it was initially reached through a FQDN that may
+	// resolve to different IPs in different DNS lookups (e.g. as in DNS round
+	// robin).
+	initialResponseCh chan hostWithResponse
 
-	id string // unique identifier for this connection
+	// id: unique identifier for this connection. This is used by the Proxy to
+	// associate requests from this connection to the corresponding outbound
+	// connection on the Proxy side.  It is populated using a type 4 UUID.
+	id string
 
-	/* Channels for processing reads, writes and closes */
-	writeRequestsCh   chan []byte         // requests to write
-	writeResponsesCh  chan rwResponse     // responses for writes
-	readRequestsCh    chan []byte         // requests to read
-	readResponsesCh   chan rwResponse     // responses for reads
-	nextRequestCh     chan *http.Request  // channel for next outgoing request
-	nextResponseCh    chan *http.Response // channel for next response
-	nextResponseErrCh chan error          // channel for error on next response
-	closeCh           chan interface{}    // close notification
+	/* Write processing */
+	writeRequestsCh  chan []byte     // requests to write
+	writeResponsesCh chan rwResponse // responses for writes
+	stopWriteCh      chan interface{}
+	doneWriting      bool
+	writeMutex       sync.RWMutex // synchronizes access to doneWriting flag
+	currentBody      []byte
+	currentBytesRead int
+
+	/* Read processing */
+	readRequestsCh  chan []byte     // requests to read
+	readResponsesCh chan rwResponse // responses for reads
+	stopReadCh      chan interface{}
+	doneReading     bool
+	readMutex       sync.RWMutex // synchronizes access to doneReading flag
+
+	/* Request processing */
+	requestOutCh      chan []byte // channel for next outgoing request body
+	requestFinishedCh chan error
+	stopRequestCh     chan interface{}
+	doneRequesting    bool
+	requestMutex      sync.RWMutex // synchronizes access to doneRequesting flag
 
 	/* Fields for tracking activity/closed status */
-	bytesWritten     int
-	lastActivityTime time.Time    // time of last read or write
-	closedMutex      sync.RWMutex // mutex controlling access to closed flag
-	closed           bool         // whether or not this Conn is closed
+	lastActivityTime  time.Time    // time of last read or write
+	lastActivityMutex sync.RWMutex // mutex controlling access to lastActivityTime
+	closed            bool         // whether or not this Conn is closed
+	closedMutex       sync.RWMutex // mutex controlling access to closed flag
 
 	/* Fields for tracking current request and response */
-	req             *http.Request  // the current request being used to send data
-	reqBody         *io.PipeReader // pipe reader for current request body
-	reqBodyWriter   *io.PipeWriter // pipe writer to current request body
-	resp            *http.Response // the current response being used to read data
-	lastRequestTime time.Time      // time of last request
-}
-
-type dialFunc func(addr string) (net.Conn, error)
-
-type newRequestFunc func(host string, method string, body io.Reader) (*http.Request, error)
-
-// rwResponse is a response to a read or write
-type rwResponse struct {
-	n   int
-	err error
+	reqBodyWriter *io.PipeWriter // pipe writer to current request body
+	resp          *http.Response // the current response being used to read data
 }
 
 // Config configures a Conn
@@ -104,14 +130,80 @@ type Config struct {
 	// NewRequest: function to create a new request to the proxy
 	NewRequest newRequestFunc
 
-	// IdleInterval: how long to wait for a read or write before switching
-	// mode to write or read
-	IdleInterval time.Duration
+	// FlushTimeout: how long to let writes idle before writing out a
+	// request to the proxy.  Defaults to 15 milliseconds.
+	FlushTimeout time.Duration
 
 	// IdleTimeout: how long to wait before closing an idle connection, defaults
 	// to 70 seconds.  The high default value is selected to work well with XMPP
 	// traffic tunneled over enproxy by Lantern.
 	IdleTimeout time.Duration
+}
+
+// dialFunc is a function that dials an address (e.g. the upstream proxy)
+type dialFunc func(addr string) (net.Conn, error)
+
+// newRequestFunc is a function that builds a new request to the upstream proxy
+type newRequestFunc func(host string, method string, body io.Reader) (*http.Request, error)
+
+// rwResponse is a response to a read or write
+type rwResponse struct {
+	n   int
+	err error
+}
+
+type hostWithResponse struct {
+	proxyHost string
+	resp      *http.Response
+	err       error
+}
+
+// Write() implements the function from net.Conn
+func (c *Conn) Write(b []byte) (n int, err error) {
+	if c.submitWrite(b) {
+		res, ok := <-c.writeResponsesCh
+		if !ok {
+			return 0, io.EOF
+		} else {
+			return res.n, res.err
+		}
+	} else {
+		return 0, io.EOF
+	}
+}
+
+// Read() implements the function from net.Conn
+func (c *Conn) Read(b []byte) (n int, err error) {
+	if c.submitRead(b) {
+		res, ok := <-c.readResponsesCh
+		if !ok {
+			return 0, io.EOF
+		} else {
+			return res.n, res.err
+		}
+	} else {
+		return 0, io.EOF
+	}
+}
+
+// Close() implements the function from net.Conn
+func (c *Conn) Close() error {
+	c.closedMutex.Lock()
+	defer c.closedMutex.Unlock()
+	if !c.closed {
+		c.stopReadCh <- nil
+		c.stopWriteCh <- nil
+		c.stopRequestCh <- nil
+		c.closed = true
+	}
+	return nil
+}
+
+// isClosed checks whether or not this connection is closed
+func (c *Conn) isClosed() bool {
+	c.closedMutex.RLock()
+	defer c.closedMutex.RUnlock()
+	return c.closed
 }
 
 // LocalAddr() is not implemented
@@ -122,42 +214,6 @@ func (c *Conn) LocalAddr() net.Addr {
 // RemoteAddr() is not implemented
 func (c *Conn) RemoteAddr() net.Addr {
 	panic("RemoteAddr() not implemented")
-}
-
-// Write() implements the function from net.Conn
-func (c *Conn) Write(b []byte) (n int, err error) {
-	if c.isClosed() {
-		return 0, io.EOF
-	}
-	c.writeRequestsCh <- b
-	res, ok := <-c.writeResponsesCh
-	if !ok {
-		return 0, io.EOF
-	} else {
-		return res.n, res.err
-	}
-}
-
-// Read() implements the function from net.Conn
-func (c *Conn) Read(b []byte) (n int, err error) {
-	if c.isClosed() {
-		return 0, io.EOF
-	}
-	c.readRequestsCh <- b
-	res, ok := <-c.readResponsesCh
-	if !ok {
-		return 0, io.EOF
-	} else {
-		return res.n, res.err
-	}
-}
-
-// Close() implements the function from net.Conn
-func (c *Conn) Close() error {
-	if c.markClosed() {
-		c.closeCh <- true
-	}
-	return nil
 }
 
 // SetDeadline() is currently unimplemented.

@@ -10,13 +10,13 @@ import (
 // once.  Using these allows us to ensure that we only create one connection per
 // connection id, but to still support doing the Dial calls concurrently.
 type lazyConn struct {
-	p         *Proxy
-	id        string
-	addr      string
-	bytesRead int
-	connOut   net.Conn
-	err       error
-	mutex     sync.Mutex
+	p       *Proxy
+	id      string
+	addr    string
+	hitEOF  bool
+	connOut net.Conn
+	err     error
+	mutex   sync.Mutex
 }
 
 func (p *Proxy) newLazyConn(id string, addr string) *lazyConn {
