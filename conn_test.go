@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -20,7 +21,9 @@ const (
 )
 
 var (
-	proxyStarted = false
+	proxyStarted  = false
+	bytesReceived = int64(0)
+	bytesSent     = int64(0)
 )
 
 func TestPlainText(t *testing.T) {
@@ -30,6 +33,13 @@ func TestPlainText(t *testing.T) {
 	defer conn.Close()
 
 	doRequests(conn, t)
+
+	if bytesReceived != 226 {
+		t.Errorf("Bytes received of %d did not match expected %d", bytesReceived, 226)
+	}
+	if bytesSent != 1322 {
+		t.Errorf("Bytes sent of %d did not match expected %d", bytesSent, 1322)
+	}
 }
 
 func TestTLS(t *testing.T) {
@@ -48,6 +58,13 @@ func TestTLS(t *testing.T) {
 	}
 
 	doRequests(tlsConn, t)
+
+	if bytesReceived != 555 {
+		t.Errorf("Bytes received of %d did not match expected %d", bytesReceived, 555)
+	}
+	if bytesSent != 4974 {
+		t.Errorf("Bytes sent of %d did not match expected %d", bytesSent, 4974)
+	}
 }
 
 func prepareConn(port int, t *testing.T) (conn *Conn) {
@@ -115,10 +132,20 @@ func readResponse(conn net.Conn, req *http.Request, t *testing.T) {
 
 func startProxy(t *testing.T) {
 	if proxyStarted {
+		atomic.StoreInt64(&bytesReceived, 0)
+		atomic.StoreInt64(&bytesSent, 0)
 		return
 	}
+
 	go func() {
-		proxy := &Proxy{}
+		proxy := &Proxy{
+			OnBytesReceived: func(clientIp string, bytes int64) {
+				bytesReceived = atomic.AddInt64(&bytesReceived, bytes)
+			},
+			OnBytesSent: func(clientIp string, bytes int64) {
+				bytesSent = atomic.AddInt64(&bytesSent, bytes)
+			},
+		}
 		err := proxy.ListenAndServe(PROXY_ADDR)
 		if err != nil {
 			t.Fatalf("Unable to listen and serve: %s", err)

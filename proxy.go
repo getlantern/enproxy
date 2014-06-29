@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -46,12 +47,22 @@ type Proxy struct {
 	// ReadBufferSize: size of read buffer in bytes
 	ReadBufferSize int
 
+	// OnBytesReceived is an optional callback for learning about bytes received
+	// from a client
+	OnBytesReceived statCallback
+
+	// OnBytesSent is an optional callback for learning about bytes sent to a
+	// client
+	OnBytesSent statCallback
+
 	// connMap: map of outbound connections by their id
 	connMap map[string]*lazyConn
 
 	// connMapMutex: synchronizes access to connMap
 	connMapMutex sync.Mutex
 }
+
+type statCallback func(clientIp string, bytes int64)
 
 // Start() starts this proxy
 func (p *Proxy) Start() {
@@ -128,7 +139,10 @@ func (p *Proxy) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 // handleWrite forwards the data from a POST to the outbound connection
 func (p *Proxy) handleWrite(resp http.ResponseWriter, req *http.Request, lc *lazyConn, connOut net.Conn, first bool) {
 	// Pipe request
-	_, err := io.Copy(connOut, req.Body)
+	n, err := io.Copy(connOut, req.Body)
+	if p.OnBytesReceived != nil && n > 0 {
+		p.OnBytesReceived(clientIpFor(req), n)
+	}
 	if err != nil && err != io.EOF {
 		badGateway(resp, fmt.Sprintf("Unable to write to connOut: %s", err))
 		return
@@ -161,6 +175,9 @@ func (p *Proxy) handleRead(resp http.ResponseWriter, req *http.Request, lc *lazy
 		return
 	}
 
+	// Get clientIp for reporting stats
+	clientIp := clientIpFor(req)
+
 	b := make([]byte, p.ReadBufferSize)
 	first := true
 	haveRead := false
@@ -186,6 +203,10 @@ func (p *Proxy) handleRead(resp http.ResponseWriter, req *http.Request, lc *lazy
 
 		// Write if necessary
 		if n > 0 {
+			if p.OnBytesSent != nil && n > 0 {
+				p.OnBytesSent(clientIp, int64(n))
+			}
+
 			haveRead = true
 			lastReadTime = time.Now()
 			bytesInBatch = bytesInBatch + n
@@ -258,6 +279,16 @@ func (p *Proxy) getLazyConn(id string, addr string) (l *lazyConn, isNew bool) {
 		isNew = true
 	}
 	return
+}
+
+func clientIpFor(req *http.Request) string {
+	clientIp := req.Header.Get("X-Forwarded-For")
+	if clientIp == "" {
+		clientIp = strings.Split(req.RemoteAddr, ":")[0]
+	}
+	// clientIp may contain multiple ips, use the first
+	ips := strings.Split(clientIp, ",")
+	return strings.TrimSpace(ips[0])
 }
 
 func badGateway(resp http.ResponseWriter, msg string) {
