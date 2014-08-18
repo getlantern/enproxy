@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net"
 	"sync"
+
+	"github.com/getlantern/idletiming"
 )
 
 // lazyConn is a lazily initializing conn that makes sure it is only initialized
@@ -43,7 +45,7 @@ func (l *lazyConn) get() (conn net.Conn, err error) {
 		}
 
 		// Wrap the connection in an idle timing one
-		l.connOut = withIdleTimeout(conn, l.p.IdleTimeout, func() {
+		l.connOut = idletiming.Conn(conn, l.p.IdleTimeout, func() {
 			delete(l.p.connMap, l.id)
 		})
 	}
