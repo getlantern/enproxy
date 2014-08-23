@@ -65,7 +65,7 @@ func (c *Conn) processReads() {
 				// Then, issue a new request
 				resp, err = c.doRequest(proxyConn, bufReader, proxyHost, OP_READ, nil)
 				if err != nil {
-					err = fmt.Errorf("Unable to issue read request: %s", err)
+					err = fmt.Errorf("Unable to issue read request to %s: %s", proxyHost, err)
 					log.Println(err.Error())
 					c.readResponsesCh <- rwResponse{0, err}
 					return

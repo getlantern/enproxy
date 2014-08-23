@@ -57,7 +57,7 @@ func (c *Conn) processRequests() {
 			resp, err = c.doRequest(proxyConn, bufReader, proxyHost, OP_WRITE, reqBody)
 			c.requestFinishedCh <- err
 			if err != nil {
-				err = fmt.Errorf("Unable to issue write request: %s", err)
+				err = fmt.Errorf("Unable to issue write request to %s: %s", proxyHost, err)
 				log.Println(err.Error())
 				if first {
 					c.initialResponseCh <- hostWithResponse{"", nil, err}
