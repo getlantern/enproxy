@@ -136,10 +136,16 @@ func (c *Conn) submitWrite(b []byte) bool {
 }
 
 func (c *Conn) cleanupAfterWrites() {
+	panicked := recover()
+
 	for {
 		select {
 		case <-c.writeRequestsCh:
-			c.writeResponsesCh <- rwResponse{0, io.EOF}
+			if panicked != nil {
+				c.writeResponsesCh <- rwResponse{0, io.ErrUnexpectedEOF}
+			} else {
+				c.writeResponsesCh <- rwResponse{0, io.EOF}
+			}
 		case <-c.stopWriteCh:
 			// do nothing
 		default:

@@ -102,10 +102,16 @@ func (c *Conn) submitRequest(body []byte) bool {
 }
 
 func (c *Conn) cleanupAfterRequests(resp *http.Response) {
+	panicked := recover()
+
 	for {
 		select {
 		case <-c.requestOutCh:
-			c.requestFinishedCh <- io.EOF
+			if panicked != nil {
+				c.requestFinishedCh <- io.ErrUnexpectedEOF
+			} else {
+				c.requestFinishedCh <- io.EOF
+			}
 		case <-c.stopRequestCh:
 			// do nothing
 		default:

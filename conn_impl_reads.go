@@ -128,10 +128,16 @@ func (c *Conn) submitRead(b []byte) bool {
 }
 
 func (c *Conn) cleanupAfterReads(resp *http.Response) {
+	panicked := recover()
+
 	for {
 		select {
 		case <-c.readRequestsCh:
-			c.readResponsesCh <- rwResponse{0, io.EOF}
+			if panicked != nil {
+				c.readResponsesCh <- rwResponse{0, io.ErrUnexpectedEOF}
+			} else {
+				c.readResponsesCh <- rwResponse{0, io.EOF}
+			}
 		case <-c.stopReadCh:
 			// do nothing
 		default:
