@@ -8,7 +8,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"strings"
 	"time"
 
 	"code.google.com/p/go-uuid/uuid"
@@ -156,17 +155,6 @@ func (c *Conn) isIdle() bool {
 	defer c.lastActivityMutex.RUnlock()
 	timeSinceLastActivity := time.Now().Sub(c.lastActivityTime)
 	return timeSinceLastActivity > c.Config.IdleTimeout
-}
-
-func BadGateway(w io.Writer, msg string) {
-	log.Printf("Sending BadGateway: %s", msg)
-	resp := &http.Response{
-		StatusCode: 502,
-		ProtoMajor: 1,
-		ProtoMinor: 1,
-		Body:       &closer{strings.NewReader(msg)},
-	}
-	resp.Write(w)
 }
 
 type closer struct {

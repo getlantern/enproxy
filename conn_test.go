@@ -37,8 +37,8 @@ func TestPlainText(t *testing.T) {
 	if bytesReceived != 226 {
 		t.Errorf("Bytes received of %d did not match expected %d", bytesReceived, 226)
 	}
-	if bytesSent != 1322 {
-		t.Errorf("Bytes sent of %d did not match expected %d", bytesSent, 1322)
+	if bytesSent != 1338 {
+		t.Errorf("Bytes sent of %d did not match expected %d", bytesSent, 1338)
 	}
 }
 
@@ -62,8 +62,8 @@ func TestTLS(t *testing.T) {
 	if bytesReceived != 555 {
 		t.Errorf("Bytes received of %d did not match expected %d", bytesReceived, 555)
 	}
-	if bytesSent != 4974 {
-		t.Errorf("Bytes sent of %d did not match expected %d", bytesSent, 4974)
+	if bytesSent != 4990 {
+		t.Errorf("Bytes sent of %d did not match expected %d", bytesSent, 4990)
 	}
 }
 
