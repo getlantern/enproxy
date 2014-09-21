@@ -94,8 +94,7 @@ type Conn struct {
 	stopWriteCh      chan interface{}
 	doneWriting      bool
 	writeMutex       sync.RWMutex // synchronizes access to doneWriting flag
-	currentBody      []byte
-	currentBytesRead int
+	rs               requestStrategy
 
 	/* Read processing */
 	readRequestsCh  chan []byte     // requests to read
@@ -117,9 +116,8 @@ type Conn struct {
 	closed            bool         // whether or not this Conn is closed
 	closedMutex       sync.RWMutex // mutex controlling access to closed flag
 
-	/* Fields for tracking current request and response */
-	reqBodyWriter *io.PipeWriter // pipe writer to current request body
-	resp          *http.Response // the current response being used to read data
+	/* Track current response */
+	resp *http.Response // the current response being used to read data
 }
 
 // Config configures a Conn

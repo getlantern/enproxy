@@ -35,91 +35,25 @@ func (c *Conn) processWrites() {
 				return
 			}
 			// We waited more than FlushTimeout for a write, finish our request
-			if c.currentBody != nil {
-				if !c.finishBody() {
-					return
-				}
+			err := c.rs.finishBody()
+			if err != nil {
+				c.writeResponsesCh <- rwResponse{0, err}
+				return
 			}
 		}
 	}
 }
 
 // processWrite processes a single write request, encapsulated in the body of a
-// POST request to the proxy.  If b is bigger than bodySize (65K), then this
-// will result in multiple POST requests.
+// POST request to the proxy. It uses the configured requestStrategy to process
+// the request. It returns true if the write was successful.
 func (c *Conn) processWrite(b []byte) bool {
-	// Consume writes as long as they keep coming in
-	bytesWritten := 0
-
-	// Copy from b into outbound body
-	for {
-		bytesRemaining := bodySize - c.currentBytesRead
-		bytesToCopy := len(b)
-		if bytesToCopy == 0 {
-			break
-		} else {
-			c.markActive()
-			if c.currentBody == nil {
-				c.initBody()
-			}
-			dst := c.currentBody[c.currentBytesRead:]
-			if bytesToCopy <= bytesRemaining {
-				// Copy the entire buffer to the destination
-				copy(dst, b)
-				c.currentBytesRead = c.currentBytesRead + bytesToCopy
-				bytesWritten = bytesWritten + bytesToCopy
-				break
-			} else {
-				// Copy as much as we can from the buffer to the destination
-				copy(dst, b[:bytesRemaining])
-				// Set buffer to remaining bytes
-				b = b[bytesRemaining:]
-				c.currentBytesRead = c.currentBytesRead + bytesRemaining
-				bytesWritten = bytesWritten + bytesRemaining
-				// Write the body
-				if !c.finishBody() {
-					return false
-				}
-			}
-		}
+	if len(b) > 0 {
+		c.markActive()
 	}
-
-	if bodySize == c.currentBytesRead {
-		// We've filled the body, write it
-		if !c.finishBody() {
-			return false
-		}
-	}
-
-	// Let the caller know how it went
-	c.writeResponsesCh <- rwResponse{bytesWritten, nil}
-	return true
-}
-
-func (c *Conn) initBody() {
-	c.currentBody = make([]byte, bodySize)
-	c.currentBytesRead = 0
-}
-
-func (c *Conn) finishBody() bool {
-	body := c.currentBody
-	if c.currentBytesRead < len(c.currentBody) {
-		body = c.currentBody[:c.currentBytesRead]
-	}
-	success := c.submitRequest(body)
-	if success {
-		err := <-c.requestFinishedCh
-		if err != nil {
-			return false
-		}
-	}
-	c.currentBody = nil
-	c.currentBytesRead = 0
-	if !success {
-		c.writeResponsesCh <- rwResponse{0, io.EOF}
-		return false
-	}
-	return true
+	n, err := c.rs.write(b)
+	c.writeResponsesCh <- rwResponse{n, err}
+	return err == nil
 }
 
 // submitWrite submits a write to the processWrites goroutine, returning true if

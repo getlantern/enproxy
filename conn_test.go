@@ -62,8 +62,8 @@ func TestTLS(t *testing.T) {
 	if bytesReceived != 555 {
 		t.Errorf("Bytes received of %d did not match expected %d", bytesReceived, 555)
 	}
-	if bytesSent != 4990 {
-		t.Errorf("Bytes sent of %d did not match expected %d", bytesSent, 4990)
+	if bytesSent != 4970 {
+		t.Errorf("Bytes sent of %d did not match expected %d", bytesSent, 4970)
 	}
 }
 

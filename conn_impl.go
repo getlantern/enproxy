@@ -21,6 +21,7 @@ func (c *Conn) Connect() (err error) {
 	c.initDefaults()
 	c.makeChannels()
 	c.markActive()
+	c.initRequestStrategy()
 
 	go c.processWrites()
 	go c.processReads()
@@ -49,6 +50,12 @@ func (c *Conn) makeChannels() {
 	c.requestOutCh = make(chan []byte)
 	c.requestFinishedCh = make(chan error)
 	c.stopRequestCh = make(chan interface{}, closeChannelDepth)
+}
+
+func (c *Conn) initRequestStrategy() {
+	c.rs = &bufferingRequestStrategy{
+		c: c,
+	}
 }
 
 func (c *Conn) dialProxy() (proxyConn net.Conn, bufReader *bufio.Reader, err error) {
