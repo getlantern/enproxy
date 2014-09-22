@@ -138,7 +138,7 @@ type Config struct {
 	IdleTimeout time.Duration
 
 	// BufferRequests: if true, requests to the proxy will be buffered and sent
-	// with identity encoding.  If fals, they'll be streamed with chunked
+	// with identity encoding.  If false, they'll be streamed with chunked
 	// encoding.
 	BufferRequests bool
 }
