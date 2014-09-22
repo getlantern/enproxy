@@ -2,7 +2,6 @@ package enproxy
 
 import (
 	"bufio"
-	"bytes"
 	"fmt"
 	"io"
 	"log"
@@ -47,7 +46,7 @@ func (c *Conn) makeChannels() {
 	c.readRequestsCh = make(chan []byte)
 	c.readResponsesCh = make(chan rwResponse)
 	c.stopReadCh = make(chan interface{}, closeChannelDepth)
-	c.requestOutCh = make(chan []byte)
+	c.requestOutCh = make(chan *request)
 	c.requestFinishedCh = make(chan error)
 	c.stopRequestCh = make(chan interface{}, closeChannelDepth)
 }
@@ -95,10 +94,10 @@ func (c *Conn) redialProxyIfNecessary(origProxyConn net.Conn, origBufReader *buf
 	return
 }
 
-func (c *Conn) doRequest(proxyConn net.Conn, bufReader *bufio.Reader, host string, op string, bodyBytes []byte) (resp *http.Response, err error) {
+func (c *Conn) doRequest(proxyConn net.Conn, bufReader *bufio.Reader, host string, op string, request *request) (resp *http.Response, err error) {
 	var body io.Reader
-	if bodyBytes != nil {
-		body = &closer{bytes.NewReader(bodyBytes)}
+	if request != nil {
+		body = request.body
 	}
 	req, err := c.Config.NewRequest(host, "POST", body)
 	if err != nil {
@@ -111,11 +110,11 @@ func (c *Conn) doRequest(proxyConn net.Conn, bufReader *bufio.Reader, host strin
 	// Always send the address that we're trying to reach
 	req.Header.Set(X_ENPROXY_DEST_ADDR, c.Addr)
 	req.Header.Set("Content-type", "application/octet-stream")
-	if bodyBytes != nil {
-		// Always force identity encoding to appeas CDNs like Fastly that can't
+	if request != nil && request.length > 0 {
+		// Force identity encoding to appeas CDNs like Fastly that can't
 		// handle chunked encoding on requests
 		req.TransferEncoding = []string{"identity"}
-		req.ContentLength = int64(len(bodyBytes))
+		req.ContentLength = int64(request.length)
 	} else {
 		req.ContentLength = 0
 	}

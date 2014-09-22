@@ -104,7 +104,7 @@ type Conn struct {
 	readMutex       sync.RWMutex // synchronizes access to doneReading flag
 
 	/* Request processing */
-	requestOutCh      chan []byte // channel for next outgoing request body
+	requestOutCh      chan *request // channel for next outgoing request body
 	requestFinishedCh chan error
 	stopRequestCh     chan interface{}
 	doneRequesting    bool

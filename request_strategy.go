@@ -1,8 +1,15 @@
 package enproxy
 
 import (
+	"bytes"
 	"io"
 )
+
+// request is an outgoing request to the upstream proxy
+type request struct {
+	body   io.ReadCloser
+	length int
+}
 
 // requestStrategy encapsulates a strategy for making requests upstream (either
 // buffered or streaming)
@@ -82,7 +89,10 @@ func (brs *bufferingRequestStrategy) finishBody() error {
 	if brs.currentBytesWritten < len(brs.currentBody) {
 		body = brs.currentBody[:brs.currentBytesWritten]
 	}
-	success := brs.c.submitRequest(body)
+	success := brs.c.submitRequest(&request{
+		body:   &closer{bytes.NewReader(body)},
+		length: brs.currentBytesWritten,
+	})
 	if success {
 		err := <-brs.c.requestFinishedCh
 		if err != nil {
@@ -96,4 +106,8 @@ func (brs *bufferingRequestStrategy) finishBody() error {
 	}
 
 	return nil
+}
+
+// streamingRequestStrategy streams requests upstream.
+type streamingRequestStrategy struct {
 }

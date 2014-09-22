@@ -41,7 +41,7 @@ func (c *Conn) processRequests() {
 		}
 
 		select {
-		case reqBody := <-c.requestOutCh:
+		case request := <-c.requestOutCh:
 			// Redial the proxy if necessary
 			proxyConn, bufReader, err := c.redialProxyIfNecessary(proxyConn, bufReader)
 			if err != nil {
@@ -54,7 +54,7 @@ func (c *Conn) processRequests() {
 			}
 
 			// Then issue new request
-			resp, err = c.doRequest(proxyConn, bufReader, proxyHost, OP_WRITE, reqBody)
+			resp, err = c.doRequest(proxyConn, bufReader, proxyHost, OP_WRITE, request)
 			c.requestFinishedCh <- err
 			if err != nil {
 				err = fmt.Errorf("Unable to issue write request to %s: %s", proxyHost, err)
@@ -90,13 +90,13 @@ func (c *Conn) processRequests() {
 // submitRequest submits a request to the processRequests goroutine, returning
 // true if the request was accepted or false if requests are no longer being
 // accepted
-func (c *Conn) submitRequest(body []byte) bool {
+func (c *Conn) submitRequest(request *request) bool {
 	c.requestMutex.RLock()
 	defer c.requestMutex.RUnlock()
 	if c.doneRequesting {
 		return false
 	} else {
-		c.requestOutCh <- body
+		c.requestOutCh <- request
 		return true
 	}
 }
