@@ -71,7 +71,9 @@ func (brs *bufferingRequestStrategy) write(b []byte) (int, error) {
 				bytesWritten = bytesWritten + bytesRemaining
 				// Write the body
 				err := brs.finishBody()
-				return 0, err
+				if err != nil {
+					return 0, err
+				}
 			}
 		}
 	}
