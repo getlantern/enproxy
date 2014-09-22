@@ -136,6 +136,11 @@ type Config struct {
 	// to 70 seconds.  The high default value is selected to work well with XMPP
 	// traffic tunneled over enproxy by Lantern.
 	IdleTimeout time.Duration
+
+	// BufferRequests: if true, requests to the proxy will be buffered and sent
+	// with identity encoding.  If fals, they'll be streamed with chunked
+	// encoding.
+	BufferRequests bool
 }
 
 // dialFunc is a function that dials an address (e.g. the upstream proxy)

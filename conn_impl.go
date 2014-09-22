@@ -52,8 +52,14 @@ func (c *Conn) makeChannels() {
 }
 
 func (c *Conn) initRequestStrategy() {
-	c.rs = &bufferingRequestStrategy{
-		c: c,
+	if c.Config.BufferRequests {
+		c.rs = &bufferingRequestStrategy{
+			c: c,
+		}
+	} else {
+		c.rs = &streamingRequestStrategy{
+			c: c,
+		}
 	}
 }
 

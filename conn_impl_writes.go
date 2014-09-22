@@ -48,9 +48,6 @@ func (c *Conn) processWrites() {
 // POST request to the proxy. It uses the configured requestStrategy to process
 // the request. It returns true if the write was successful.
 func (c *Conn) processWrite(b []byte) bool {
-	if len(b) > 0 {
-		c.markActive()
-	}
 	n, err := c.rs.write(b)
 	c.writeResponsesCh <- rwResponse{n, err}
 	return err == nil

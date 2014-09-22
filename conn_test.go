@@ -26,10 +26,26 @@ var (
 	bytesSent     = int64(0)
 )
 
-func TestPlainText(t *testing.T) {
+func TestPlainTextStreaming(t *testing.T) {
+	doTestPlainText(false, t)
+}
+
+func TestPlainTextBuffered(t *testing.T) {
+	doTestPlainText(true, t)
+}
+
+func TestTLSStreaming(t *testing.T) {
+	doTestTLS(false, t)
+}
+
+func TestTLSBuffered(t *testing.T) {
+	doTestTLS(true, t)
+}
+
+func doTestPlainText(buffered bool, t *testing.T) {
 	startProxy(t)
 
-	conn := prepareConn(80, t)
+	conn := prepareConn(80, buffered, t)
 	defer conn.Close()
 
 	doRequests(conn, t)
@@ -42,10 +58,10 @@ func TestPlainText(t *testing.T) {
 	}
 }
 
-func TestTLS(t *testing.T) {
+func doTestTLS(buffered bool, t *testing.T) {
 	startProxy(t)
 
-	conn := prepareConn(443, t)
+	conn := prepareConn(443, buffered, t)
 
 	tlsConn := tls.Client(conn, &tls.Config{
 		ServerName: "www.google.com",
@@ -67,7 +83,7 @@ func TestTLS(t *testing.T) {
 	}
 }
 
-func prepareConn(port int, t *testing.T) (conn *Conn) {
+func prepareConn(port int, buffered bool, t *testing.T) (conn *Conn) {
 	addr := fmt.Sprintf("%s:%d", "www.google.com", port)
 	conn = &Conn{
 		Addr: addr,
@@ -81,6 +97,7 @@ func prepareConn(port int, t *testing.T) (conn *Conn) {
 				}
 				return http.NewRequest(method, "http://"+host, body)
 			},
+			BufferRequests: buffered,
 		},
 	}
 	conn.Connect()
