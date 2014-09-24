@@ -94,8 +94,7 @@ type Conn struct {
 	stopWriteCh      chan interface{}
 	doneWriting      bool
 	writeMutex       sync.RWMutex // synchronizes access to doneWriting flag
-	currentBody      []byte
-	currentBytesRead int
+	rs               requestStrategy
 
 	/* Read processing */
 	readRequestsCh  chan []byte     // requests to read
@@ -105,7 +104,7 @@ type Conn struct {
 	readMutex       sync.RWMutex // synchronizes access to doneReading flag
 
 	/* Request processing */
-	requestOutCh      chan []byte // channel for next outgoing request body
+	requestOutCh      chan *request // channel for next outgoing request body
 	requestFinishedCh chan error
 	stopRequestCh     chan interface{}
 	doneRequesting    bool
@@ -117,9 +116,8 @@ type Conn struct {
 	closed            bool         // whether or not this Conn is closed
 	closedMutex       sync.RWMutex // mutex controlling access to closed flag
 
-	/* Fields for tracking current request and response */
-	reqBodyWriter *io.PipeWriter // pipe writer to current request body
-	resp          *http.Response // the current response being used to read data
+	/* Track current response */
+	resp *http.Response // the current response being used to read data
 }
 
 // Config configures a Conn
@@ -138,6 +136,11 @@ type Config struct {
 	// to 70 seconds.  The high default value is selected to work well with XMPP
 	// traffic tunneled over enproxy by Lantern.
 	IdleTimeout time.Duration
+
+	// BufferRequests: if true, requests to the proxy will be buffered and sent
+	// with identity encoding.  If false, they'll be streamed with chunked
+	// encoding.
+	BufferRequests bool
 }
 
 // dialFunc is a function that dials an address (e.g. the upstream proxy)
