@@ -58,7 +58,7 @@ func (c *Conn) processReads() {
 				// First, redial the proxy if necessary
 				proxyConn, bufReader, err := c.redialProxyIfNecessary(proxyConn, bufReader)
 				if err != nil {
-					c.readResponsesCh <- rwResponse{0, fmt.Errorf("Unable to redial proxy: %s", err)}
+					c.readResponsesCh <- rwResponse{0, fmt.Errorf("Unable to redial proxy at %s: %s", proxyHost, err)}
 					return
 				}
 
@@ -99,7 +99,7 @@ func (c *Conn) processReads() {
 					}
 					continue
 				} else {
-					log.Printf("Unexpected error reading from proxyConn: %s", err)
+					log.Printf("Unexpected error reading from %s: %s", proxyHost, err)
 					return
 				}
 			}

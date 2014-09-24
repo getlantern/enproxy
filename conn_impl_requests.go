@@ -45,7 +45,7 @@ func (c *Conn) processRequests() {
 			// Redial the proxy if necessary
 			proxyConn, bufReader, err := c.redialProxyIfNecessary(proxyConn, bufReader)
 			if err != nil {
-				err = fmt.Errorf("Unable to redial proxy: %s", err)
+				err = fmt.Errorf("Unable to redial proxy at %s: %s", proxyHost, err)
 				log.Println(err.Error())
 				if first {
 					c.initialResponseCh <- hostWithResponse{"", nil, err}
