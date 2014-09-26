@@ -40,6 +40,10 @@ func (c *Conn) processReads() {
 	// first read
 	resp = initialResponse.resp
 
+	mkerror := func(text string, err error) error {
+		return fmt.Errorf("Dest: %s    ProxyHost: %s    %s: %s", c.Addr, proxyHost, text, err)
+	}
+
 	for {
 		if c.isClosed() {
 			return
@@ -58,14 +62,14 @@ func (c *Conn) processReads() {
 				// First, redial the proxy if necessary
 				proxyConn, bufReader, err := c.redialProxyIfNecessary(proxyConn, bufReader)
 				if err != nil {
-					c.readResponsesCh <- rwResponse{0, fmt.Errorf("Unable to redial proxy at %s: %s", proxyHost, err)}
+					c.readResponsesCh <- rwResponse{0, mkerror("Unable to redial proxy", err)}
 					return
 				}
 
 				// Then, issue a new request
 				resp, err = c.doRequest(proxyConn, bufReader, proxyHost, OP_READ, nil)
 				if err != nil {
-					err = fmt.Errorf("Unable to issue read request to %s: %s", proxyHost, err)
+					err = mkerror("Unable to issue read request", err)
 					log.Println(err.Error())
 					c.readResponsesCh <- rwResponse{0, err}
 					return
@@ -99,7 +103,7 @@ func (c *Conn) processReads() {
 					}
 					continue
 				} else {
-					log.Printf("Unexpected error reading from %s: %s", proxyHost, err)
+					log.Print(err.Error())
 					return
 				}
 			}

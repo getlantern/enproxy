@@ -35,6 +35,10 @@ func (c *Conn) processRequests() {
 	var proxyHost string
 	first := true
 
+	mkerror := func(text string, err error) error {
+		return fmt.Errorf("Dest: %s    ProxyHost: %s    %s: %s", c.Addr, proxyHost, text, err)
+	}
+
 	for {
 		if c.isClosed() {
 			return
@@ -45,7 +49,7 @@ func (c *Conn) processRequests() {
 			// Redial the proxy if necessary
 			proxyConn, bufReader, err := c.redialProxyIfNecessary(proxyConn, bufReader)
 			if err != nil {
-				err = fmt.Errorf("Unable to redial proxy at %s: %s", proxyHost, err)
+				err = mkerror("Unable to redial proxy", err)
 				log.Println(err.Error())
 				if first {
 					c.initialResponseCh <- hostWithResponse{"", nil, err}
@@ -57,7 +61,7 @@ func (c *Conn) processRequests() {
 			resp, err = c.doRequest(proxyConn, bufReader, proxyHost, OP_WRITE, request)
 			c.requestFinishedCh <- err
 			if err != nil {
-				err = fmt.Errorf("Unable to issue write request to %s: %s", proxyHost, err)
+				err = mkerror("Unable to issue write request", err)
 				log.Println(err.Error())
 				if first {
 					c.initialResponseCh <- hostWithResponse{"", nil, err}
