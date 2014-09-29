@@ -82,9 +82,17 @@ func (c *Conn) redialProxyIfNecessary(origProxyConn net.Conn, origBufReader *buf
 	bufReader = origBufReader
 
 	// Make sure connection is still open and redial if necessary
-	origProxyConn.SetReadDeadline(time.Now().Add(5 * time.Millisecond))
+	err = origProxyConn.SetReadDeadline(time.Now().Add(5 * time.Millisecond))
+	if err != nil {
+		err = fmt.Errorf("conn_impl::redialProxyIfNecessary Error setting read deadline %s", err)
+		return
+	}
 	_, err = origBufReader.Peek(1)
-	origProxyConn.SetReadDeadline(time.Time{})
+	err = origProxyConn.SetReadDeadline(time.Now().Add(c.Config.IdleTimeout))
+	if err != nil {
+		err = fmt.Errorf("conn_impl::redialProxyIfNecessary Error clearing read deadline %s", err)
+		return
+	}
 	if err == io.EOF {
 		// Close original connection
 		origProxyConn.Close()
@@ -138,7 +146,11 @@ func (c *Conn) doRequest(proxyConn net.Conn, bufReader *bufio.Reader, host strin
 	}
 
 	// Don't spend more than IdleTimeout trying to read from response
-	proxyConn.SetReadDeadline(time.Now().Add(c.Config.IdleTimeout))
+	err = proxyConn.SetReadDeadline(time.Now().Add(c.Config.IdleTimeout))
+	if err != nil {
+		err = fmt.Errorf("conn_impl::doRequest Error setting read deadline %s", err)
+		return
+	}
 	resp, err = http.ReadResponse(bufReader, req)
 	if err != nil {
 		err = fmt.Errorf("Error reading response from proxy: %s", err)
