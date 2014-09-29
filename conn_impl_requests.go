@@ -47,7 +47,7 @@ func (c *Conn) processRequests() {
 		select {
 		case request := <-c.requestOutCh:
 			// Redial the proxy if necessary
-			proxyConn, bufReader, err := c.redialProxyIfNecessary(proxyConn, bufReader)
+			proxyConn, bufReader, err = c.redialProxyIfNecessary(proxyConn, bufReader)
 			if err != nil {
 				err = mkerror("Unable to redial proxy", err)
 				log.Println(err.Error())

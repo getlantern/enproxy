@@ -60,7 +60,7 @@ func (c *Conn) processReads() {
 				}
 
 				// First, redial the proxy if necessary
-				proxyConn, bufReader, err := c.redialProxyIfNecessary(proxyConn, bufReader)
+				proxyConn, bufReader, err = c.redialProxyIfNecessary(proxyConn, bufReader)
 				if err != nil {
 					c.readResponsesCh <- rwResponse{0, mkerror("Unable to redial proxy", err)}
 					return
