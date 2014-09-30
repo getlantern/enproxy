@@ -69,7 +69,7 @@ func (c *Conn) dialProxy() (proxyConn net.Conn, bufReader *bufio.Reader, err err
 		err = fmt.Errorf("Unable to dial proxy: %s", err)
 		return
 	}
-	log.Printf("Dialed to: %s", proxyConn.RemoteAddr())
+	log.Printf("Dest: %s    Dialed to: %s", c.Addr, proxyConn.RemoteAddr())
 	bufReader = bufio.NewReader(proxyConn)
 	return
 }
