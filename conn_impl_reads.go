@@ -51,6 +51,7 @@ func (c *Conn) processReads() {
 
 		select {
 		case b := <-c.readRequestsCh:
+			log.Printf("Dest: %s    proxyConn is: %s", c.Addr, &proxyConn)
 			if resp == nil {
 				// Old response finished
 				if c.isIdle() {
@@ -60,13 +61,16 @@ func (c *Conn) processReads() {
 				}
 
 				// First, redial the proxy if necessary
+				log.Printf("Dest: %s    Redialing if necessary on proxyConn %s", c.Addr, &proxyConn)
 				proxyConn, bufReader, err = c.redialProxyIfNecessary(proxyConn, bufReader)
+				log.Printf("Dest: %s    Redial returned proxyConn %s", c.Addr, &proxyConn)
 				if err != nil {
 					c.readResponsesCh <- rwResponse{0, mkerror("Unable to redial proxy", err)}
 					return
 				}
 
 				// Then, issue a new request
+				log.Printf("Dest: %s    Doing request on proxyConn %s", c.Addr, &proxyConn)
 				resp, err = c.doRequest(proxyConn, bufReader, proxyHost, OP_READ, nil)
 				if err != nil {
 					err = mkerror("Unable to issue read request", err)
@@ -77,6 +81,7 @@ func (c *Conn) processReads() {
 			}
 
 			// Process read, but don't wait longer than IdleTimeout
+			log.Printf("Dest: %s    Setting read deadline on proxyConn %s", c.Addr, &proxyConn)
 			proxyConn.SetReadDeadline(time.Now().Add(c.Config.IdleTimeout))
 			n, err := resp.Body.Read(b)
 			if n > 0 {
@@ -103,7 +108,7 @@ func (c *Conn) processReads() {
 					}
 					continue
 				} else {
-					log.Print("Error reading: %s", err)
+					log.Printf("Dest: %s    Error reading proxyConn %s: %s", c.Addr, &proxyConn, err)
 					return
 				}
 			}
