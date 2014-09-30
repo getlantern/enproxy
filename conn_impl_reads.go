@@ -103,7 +103,7 @@ func (c *Conn) processReads() {
 					}
 					continue
 				} else {
-					log.Print(err.Error())
+					log.Print("Error reading: %s", err)
 					return
 				}
 			}
