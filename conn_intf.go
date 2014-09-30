@@ -1,6 +1,7 @@
 package enproxy
 
 import (
+	"bufio"
 	"io"
 	"net"
 	"net/http"
@@ -158,6 +159,8 @@ type rwResponse struct {
 type hostWithResponse struct {
 	proxyHost string
 	resp      *http.Response
+	proxyConn net.Conn
+	bufReader *bufio.Reader
 	err       error
 }
 

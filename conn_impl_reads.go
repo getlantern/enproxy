@@ -11,16 +11,21 @@ import (
 // processReads processes read requests by polling the proxy with GET requests
 // and reading the data from the resulting response body
 func (c *Conn) processReads() {
-	var resp *http.Response
+	// Wait for connection and response from first write request so that we know
+	// where to send read requests.
+	initialResponse := <-c.initialResponseCh
+	err := initialResponse.err
+	if err != nil {
+		return
+	}
+
+	proxyHost := initialResponse.proxyHost
+	resp := initialResponse.resp
+	proxyConn := initialResponse.proxyConn
+	bufReader := initialResponse.bufReader
 
 	defer c.cleanupAfterReads(resp)
 
-	// Dial proxy
-	proxyConn, bufReader, err := c.dialProxy()
-	if err != nil {
-		log.Printf("Unable to dial proxy to GET data: %s", err)
-		return
-	}
 	defer func() {
 		// If there's a proxyConn at the time that processReads() exits, close
 		// it.
@@ -28,17 +33,6 @@ func (c *Conn) processReads() {
 			proxyConn.Close()
 		}
 	}()
-
-	// Wait for proxy host determined by first write request so that we know
-	// where to send read requests.
-	initialResponse := <-c.initialResponseCh
-	if initialResponse.err != nil {
-		return
-	}
-	proxyHost := initialResponse.proxyHost
-	// Also grab the initial response body to save an extra round trip for the
-	// first read
-	resp = initialResponse.resp
 
 	mkerror := func(text string, err error) error {
 		return fmt.Errorf("Dest: %s    ProxyHost: %s    %s: %s", c.Addr, proxyHost, text, err)

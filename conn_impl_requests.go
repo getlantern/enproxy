@@ -50,9 +50,9 @@ func (c *Conn) processRequests() {
 			proxyConn, bufReader, err = c.redialProxyIfNecessary(proxyConn, bufReader)
 			if err != nil {
 				err = mkerror("Unable to redial proxy", err)
-				log.Println(err.Error())
+				log.Println(err)
 				if first {
-					c.initialResponseCh <- hostWithResponse{"", nil, err}
+					c.initialResponseCh <- hostWithResponse{err: err}
 				}
 				return
 			}
@@ -64,7 +64,7 @@ func (c *Conn) processRequests() {
 				err = mkerror("Unable to issue write request", err)
 				log.Println(err.Error())
 				if first {
-					c.initialResponseCh <- hostWithResponse{"", nil, err}
+					c.initialResponseCh <- hostWithResponse{err: err}
 				}
 				return
 			}
@@ -76,8 +76,20 @@ func (c *Conn) processRequests() {
 				// Also post it to initialResponseCh so that the processReads()
 				// routine knows which proxyHost to use and gets the initial
 				// response data
-				c.initialResponseCh <- hostWithResponse{proxyHost, resp, nil}
+				c.initialResponseCh <- hostWithResponse{
+					proxyHost: proxyHost,
+					resp:      resp,
+					proxyConn: proxyConn,
+					bufReader: bufReader,
+				}
 				first = false
+				// Dial again because our old proxyConn is now being used by the reader goroutine
+				proxyConn, bufReader, err = c.dialProxy()
+				if err != nil {
+					err = mkerror("Unable to dial proxy for 2nd request", err)
+					log.Println(err)
+					return
+				}
 			} else {
 				resp.Body.Close()
 			}
