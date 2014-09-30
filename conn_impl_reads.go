@@ -84,6 +84,7 @@ func (c *Conn) processReads() {
 			log.Printf("Dest: %s    Setting read deadline on proxyConn %s", c.Addr, &proxyConn)
 			proxyConn.SetReadDeadline(time.Now().Add(c.Config.IdleTimeout))
 			n, err := resp.Body.Read(b)
+			log.Printf("Dest: %s    proxyConn %s   read %d", c.Addr, &proxyConn, n)
 			if n > 0 {
 				c.markActive()
 			}
@@ -108,7 +109,7 @@ func (c *Conn) processReads() {
 					}
 					continue
 				} else {
-					log.Printf("Dest: %s    Error reading proxyConn %s: %s", c.Addr, &proxyConn, err)
+					log.Printf("Dest: %s    Addr: %s    Error reading proxyConn %s: %s", c.Addr, proxyConn.RemoteAddr(), &proxyConn, err)
 					return
 				}
 			}
