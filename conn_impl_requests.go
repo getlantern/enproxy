@@ -16,7 +16,8 @@ import (
 func (c *Conn) processRequests() {
 	var resp *http.Response
 
-	defer c.cleanupAfterRequests(resp)
+	first := true
+	defer c.cleanupAfterRequests(resp, first)
 
 	// Dial proxy
 	proxyConn, bufReader, err := c.dialProxy()
@@ -27,13 +28,12 @@ func (c *Conn) processRequests() {
 	defer func() {
 		// If there's a proxyConn at the time that processRequests() exits,
 		// close it.
-		if proxyConn != nil {
+		if !first && proxyConn != nil {
 			proxyConn.Close()
 		}
 	}()
 
 	var proxyHost string
-	first := true
 
 	mkerror := func(text string, err error) error {
 		return fmt.Errorf("Dest: %s    ProxyHost: %s    %s: %s", c.Addr, proxyHost, text, err)
@@ -117,7 +117,7 @@ func (c *Conn) submitRequest(request *request) bool {
 	}
 }
 
-func (c *Conn) cleanupAfterRequests(resp *http.Response) {
+func (c *Conn) cleanupAfterRequests(resp *http.Response, first bool) {
 	panicked := recover()
 
 	for {
@@ -135,7 +135,7 @@ func (c *Conn) cleanupAfterRequests(resp *http.Response) {
 			c.doneRequesting = true
 			c.requestMutex.Unlock()
 			close(c.requestOutCh)
-			if resp != nil {
+			if !first && resp != nil {
 				resp.Body.Close()
 			}
 			return
