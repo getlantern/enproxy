@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"code.google.com/p/go-uuid/uuid"
+	"github.com/getlantern/idletiming"
 )
 
 // Connect opens a connection to the proxy and starts processing writes and
@@ -62,20 +63,26 @@ func (c *Conn) initRequestStrategy() {
 }
 
 func (c *Conn) dialProxy() (*connInfo, error) {
-	lastDialed := time.Now()
 	conn, err := c.Config.DialProxy(c.Addr)
 	if err != nil {
 		return nil, fmt.Errorf("Unable to dial proxy: %s", err)
 	}
-	return &connInfo{
-		lastDialed: lastDialed,
-		conn:       conn,
-		bufReader:  bufio.NewReader(conn),
-	}, nil
+	proxyConn := &connInfo{
+		bufReader: bufio.NewReader(conn),
+	}
+	proxyConn.conn = idletiming.Conn(conn, c.Config.IdleTimeout, func() {
+		// When the underlying connection times out, mark the connInfo closed
+		proxyConn.closedMutex.Lock()
+		defer proxyConn.closedMutex.Unlock()
+		proxyConn.closed = true
+	})
+	return proxyConn, nil
 }
 
 func (c *Conn) redialProxyIfNecessary(proxyConn *connInfo) (*connInfo, error) {
-	if time.Now().Sub(proxyConn.lastDialed) > redialInterval {
+	proxyConn.closedMutex.Lock()
+	defer proxyConn.closedMutex.Unlock()
+	if proxyConn.closed {
 		return c.dialProxy()
 	} else {
 		return proxyConn, nil
@@ -107,24 +114,12 @@ func (c *Conn) doRequest(proxyConn *connInfo, host string, op string, request *r
 		req.ContentLength = 0
 	}
 
-	// Important - we set WriteDeadline and ReadDeadline separately instead of
-	// calling SetDeadline because we will later change the read and write
-	// deadlines independently.
-
-	// Don't spend more than IdleTimeout trying to write to request
-	proxyConn.conn.SetWriteDeadline(time.Now().Add(c.Config.IdleTimeout))
 	err = req.Write(proxyConn.conn)
 	if err != nil {
 		err = fmt.Errorf("Error sending request to proxy: %s", err)
 		return
 	}
 
-	// Don't spend more than IdleTimeout trying to read from response
-	err = proxyConn.conn.SetReadDeadline(time.Now().Add(c.Config.IdleTimeout))
-	if err != nil {
-		err = fmt.Errorf("doRequest - Error setting read deadline %s", err)
-		return
-	}
 	resp, err = http.ReadResponse(proxyConn.bufReader, req)
 	if err != nil {
 		err = fmt.Errorf("Error reading response from proxy: %s", err)

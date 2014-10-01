@@ -23,9 +23,8 @@ const (
 var (
 	defaultWriteFlushTimeout = 35 * time.Millisecond
 	defaultReadFlushTimeout  = 35 * time.Millisecond
-	defaultIdleTimeoutClient = 30 * time.Second // if this is set too low, Lantern's login sequence runs into trouble
+	defaultIdleTimeoutClient = 30 * time.Second
 	defaultIdleTimeoutServer = 70 * time.Second
-	redialInterval           = 10 * time.Second // TODO: make this configurable
 
 	// closeChannelDepth: controls depth of channels used for close processing.
 	// Doesn't need to be particularly big, as it's just used to prevent
@@ -135,8 +134,14 @@ type Config struct {
 	FlushTimeout time.Duration
 
 	// IdleTimeout: how long to wait before closing an idle connection, defaults
-	// to 70 seconds.  The high default value is selected to work well with XMPP
-	// traffic tunneled over enproxy by Lantern.
+	// to 30 seconds on the client and 70 seconds on the server proxy.
+	//
+	// For clients, the value should be set lower than the proxy's idle timeout
+	// so that enproxy redials before the active connection is closed. The value
+	// should be set higher than the maximum possible time between the proxy
+	// receiving the last data from a request and the proxy returning the first
+	// data of the response, otherwise the connection will be closed in the
+	// middle of processing a request.
 	IdleTimeout time.Duration
 
 	// BufferRequests: if true, requests to the proxy will be buffered and sent
@@ -158,9 +163,10 @@ type rwResponse struct {
 }
 
 type connInfo struct {
-	lastDialed time.Time
-	conn       net.Conn
-	bufReader  *bufio.Reader
+	conn        net.Conn
+	bufReader   *bufio.Reader
+	closed      bool
+	closedMutex sync.Mutex
 }
 
 type hostWithResponse struct {

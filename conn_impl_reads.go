@@ -67,8 +67,6 @@ func (c *Conn) processReads() {
 				}
 			}
 
-			// Process read, but don't wait longer than IdleTimeout
-			proxyConn.conn.SetReadDeadline(time.Now().Add(c.Config.IdleTimeout))
 			n, err := resp.Body.Read(b)
 			if n > 0 {
 				c.markActive()
