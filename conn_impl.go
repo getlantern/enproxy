@@ -4,8 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"log"
-	"net"
 	"net/http"
 	"time"
 
@@ -63,52 +61,28 @@ func (c *Conn) initRequestStrategy() {
 	}
 }
 
-func (c *Conn) dialProxy() (proxyConn net.Conn, bufReader *bufio.Reader, err error) {
-	proxyConn, err = c.Config.DialProxy(c.Addr)
+func (c *Conn) dialProxy() (*connInfo, error) {
+	lastDialed := time.Now()
+	conn, err := c.Config.DialProxy(c.Addr)
 	if err != nil {
-		err = fmt.Errorf("Unable to dial proxy: %s", err)
-		return
+		return nil, fmt.Errorf("Unable to dial proxy: %s", err)
 	}
-	bufReader = bufio.NewReader(proxyConn)
-	return
+	return &connInfo{
+		lastDialed: lastDialed,
+		conn:       conn,
+		bufReader:  bufio.NewReader(conn),
+	}, nil
 }
 
-// redialProxyIfNecessary redials the proxy if the original connection got
-// closed somehow.  This will happen especially when using an intermediary proxy
-// like a CDN, which will sometimes aggressively close idle connections.
-func (c *Conn) redialProxyIfNecessary(origProxyConn net.Conn, origBufReader *bufio.Reader) (proxyConn net.Conn, bufReader *bufio.Reader, err error) {
-	// Default to keeping the same connection
-	proxyConn = origProxyConn
-	bufReader = origBufReader
-
-	// Make sure connection is still open and redial if necessary
-	err = origProxyConn.SetReadDeadline(time.Now().Add(5 * time.Millisecond))
-	if err != nil {
-		err = fmt.Errorf("conn_impl::redialProxyIfNecessary Error setting read deadline %s", err)
-		return
-	}
-	_, err = origBufReader.Peek(1)
-	err = origProxyConn.SetReadDeadline(time.Now().Add(c.Config.IdleTimeout))
-	if err != nil {
-		err = fmt.Errorf("conn_impl::redialProxyIfNecessary Error clearing read deadline %s", err)
-		return
-	}
-	if err == io.EOF {
-		// Close original connection
-		origProxyConn.Close()
-		// Dial again
-		proxyConn, bufReader, err = c.dialProxy()
-		if err != nil {
-			log.Println("Unable to redial proxy: %s", err)
-			return
-		}
+func (c *Conn) redialProxyIfNecessary(proxyConn *connInfo) (*connInfo, error) {
+	if time.Now().Sub(proxyConn.lastDialed) > redialInterval {
+		return c.dialProxy()
 	} else {
-		err = nil
+		return proxyConn, nil
 	}
-	return
 }
 
-func (c *Conn) doRequest(proxyConn net.Conn, bufReader *bufio.Reader, host string, op string, request *request) (resp *http.Response, err error) {
+func (c *Conn) doRequest(proxyConn *connInfo, host string, op string, request *request) (resp *http.Response, err error) {
 	var body io.Reader
 	if request != nil {
 		body = request.body
@@ -138,20 +112,20 @@ func (c *Conn) doRequest(proxyConn net.Conn, bufReader *bufio.Reader, host strin
 	// deadlines independently.
 
 	// Don't spend more than IdleTimeout trying to write to request
-	proxyConn.SetWriteDeadline(time.Now().Add(c.Config.IdleTimeout))
-	err = req.Write(proxyConn)
+	proxyConn.conn.SetWriteDeadline(time.Now().Add(c.Config.IdleTimeout))
+	err = req.Write(proxyConn.conn)
 	if err != nil {
 		err = fmt.Errorf("Error sending request to proxy: %s", err)
 		return
 	}
 
 	// Don't spend more than IdleTimeout trying to read from response
-	err = proxyConn.SetReadDeadline(time.Now().Add(c.Config.IdleTimeout))
+	err = proxyConn.conn.SetReadDeadline(time.Now().Add(c.Config.IdleTimeout))
 	if err != nil {
-		err = fmt.Errorf("conn_impl::doRequest Error setting read deadline %s", err)
+		err = fmt.Errorf("doRequest - Error setting read deadline %s", err)
 		return
 	}
-	resp, err = http.ReadResponse(bufReader, req)
+	resp, err = http.ReadResponse(proxyConn.bufReader, req)
 	if err != nil {
 		err = fmt.Errorf("Error reading response from proxy: %s", err)
 		return

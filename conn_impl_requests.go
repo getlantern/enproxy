@@ -20,7 +20,7 @@ func (c *Conn) processRequests() {
 	defer c.cleanupAfterRequests(resp, first)
 
 	// Dial proxy
-	proxyConn, bufReader, err := c.dialProxy()
+	proxyConn, err := c.dialProxy()
 	if err != nil {
 		log.Printf("Unable to dial proxy for POSTing request: %s", err)
 		return
@@ -29,7 +29,7 @@ func (c *Conn) processRequests() {
 		// If there's a proxyConn at the time that processRequests() exits,
 		// close it.
 		if !first && proxyConn != nil {
-			proxyConn.Close()
+			proxyConn.conn.Close()
 		}
 	}()
 
@@ -46,8 +46,7 @@ func (c *Conn) processRequests() {
 
 		select {
 		case request := <-c.requestOutCh:
-			// Redial the proxy if necessary
-			proxyConn, bufReader, err = c.redialProxyIfNecessary(proxyConn, bufReader)
+			proxyConn, err = c.redialProxyIfNecessary(proxyConn)
 			if err != nil {
 				err = mkerror("Unable to redial proxy", err)
 				log.Println(err)
@@ -58,7 +57,7 @@ func (c *Conn) processRequests() {
 			}
 
 			// Then issue new request
-			resp, err = c.doRequest(proxyConn, bufReader, proxyHost, OP_WRITE, request)
+			resp, err = c.doRequest(proxyConn, proxyHost, OP_WRITE, request)
 			c.requestFinishedCh <- err
 			if err != nil {
 				err = mkerror("Unable to issue write request", err)
@@ -73,18 +72,21 @@ func (c *Conn) processRequests() {
 				// On our first request, find out what host we're actually
 				// talking to and remember that for future requests.
 				proxyHost = resp.Header.Get(X_ENPROXY_PROXY_HOST)
+
 				// Also post it to initialResponseCh so that the processReads()
 				// routine knows which proxyHost to use and gets the initial
 				// response data
 				c.initialResponseCh <- hostWithResponse{
 					proxyHost: proxyHost,
-					resp:      resp,
 					proxyConn: proxyConn,
-					bufReader: bufReader,
+					resp:      resp,
 				}
+
 				first = false
-				// Dial again because our old proxyConn is now being used by the reader goroutine
-				proxyConn, bufReader, err = c.dialProxy()
+
+				// Dial again because our old proxyConn is now being used by the
+				// reader goroutine
+				proxyConn, err = c.dialProxy()
 				if err != nil {
 					err = mkerror("Unable to dial proxy for 2nd request", err)
 					log.Println(err)

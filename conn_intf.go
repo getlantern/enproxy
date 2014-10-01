@@ -25,6 +25,7 @@ var (
 	defaultReadFlushTimeout  = 35 * time.Millisecond
 	defaultIdleTimeoutClient = 30 * time.Second // if this is set too low, Lantern's login sequence runs into trouble
 	defaultIdleTimeoutServer = 70 * time.Second
+	redialInterval           = 10 * time.Second // TODO: make this configurable
 
 	// closeChannelDepth: controls depth of channels used for close processing.
 	// Doesn't need to be particularly big, as it's just used to prevent
@@ -156,11 +157,16 @@ type rwResponse struct {
 	err error
 }
 
+type connInfo struct {
+	lastDialed time.Time
+	conn       net.Conn
+	bufReader  *bufio.Reader
+}
+
 type hostWithResponse struct {
 	proxyHost string
+	proxyConn *connInfo
 	resp      *http.Response
-	proxyConn net.Conn
-	bufReader *bufio.Reader
 	err       error
 }
 

@@ -20,9 +20,8 @@ func (c *Conn) processReads() {
 	}
 
 	proxyHost := initialResponse.proxyHost
-	resp := initialResponse.resp
 	proxyConn := initialResponse.proxyConn
-	bufReader := initialResponse.bufReader
+	resp := initialResponse.resp
 
 	defer c.cleanupAfterReads(resp)
 
@@ -30,7 +29,7 @@ func (c *Conn) processReads() {
 		// If there's a proxyConn at the time that processReads() exits, close
 		// it.
 		if proxyConn != nil {
-			proxyConn.Close()
+			proxyConn.conn.Close()
 		}
 	}()
 
@@ -53,25 +52,23 @@ func (c *Conn) processReads() {
 					return
 				}
 
-				// First, redial the proxy if necessary
-				proxyConn, bufReader, err = c.redialProxyIfNecessary(proxyConn, bufReader)
+				proxyConn, err = c.redialProxyIfNecessary(proxyConn)
 				if err != nil {
 					c.readResponsesCh <- rwResponse{0, mkerror("Unable to redial proxy", err)}
 					return
 				}
 
-				// Then, issue a new request
-				resp, err = c.doRequest(proxyConn, bufReader, proxyHost, OP_READ, nil)
+				resp, err = c.doRequest(proxyConn, proxyHost, OP_READ, nil)
 				if err != nil {
 					err = mkerror("Unable to issue read request", err)
-					log.Println(err.Error())
+					log.Println(err)
 					c.readResponsesCh <- rwResponse{0, err}
 					return
 				}
 			}
 
 			// Process read, but don't wait longer than IdleTimeout
-			proxyConn.SetReadDeadline(time.Now().Add(c.Config.IdleTimeout))
+			proxyConn.conn.SetReadDeadline(time.Now().Add(c.Config.IdleTimeout))
 			n, err := resp.Body.Read(b)
 			if n > 0 {
 				c.markActive()
