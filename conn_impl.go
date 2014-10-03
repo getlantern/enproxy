@@ -82,7 +82,8 @@ func (c *Conn) dialProxy() (*connInfo, error) {
 func (c *Conn) redialProxyIfNecessary(proxyConn *connInfo) (*connInfo, error) {
 	proxyConn.closedMutex.Lock()
 	defer proxyConn.closedMutex.Unlock()
-	if proxyConn.closed {
+	if proxyConn.closed || proxyConn.conn.TimesOutIn() < oneSecond {
+		proxyConn.conn.Close()
 		return c.dialProxy()
 	} else {
 		return proxyConn, nil

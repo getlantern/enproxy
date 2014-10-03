@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/getlantern/idletiming"
 )
 
 const (
@@ -32,6 +34,8 @@ var (
 	closeChannelDepth = 20
 
 	bodySize = 65536 // size of buffer used for request bodies
+
+	oneSecond = 1 * time.Second
 )
 
 // Conn is a net.Conn that tunnels its data via an httpconn.Proxy using HTTP
@@ -163,7 +167,7 @@ type rwResponse struct {
 }
 
 type connInfo struct {
-	conn        net.Conn
+	conn        *idletiming.IdleTimingConn
 	bufReader   *bufio.Reader
 	closed      bool
 	closedMutex sync.Mutex
