@@ -5,6 +5,10 @@ import (
 	"time"
 )
 
+var (
+	emptyBytes = []byte{}
+)
+
 // processWrites processes write requests by writing them to the body of a POST
 // request.  Note - processWrites doesn't actually send the POST requests,
 // that's handled by the processRequests goroutine.  The reason that we do this
@@ -16,6 +20,9 @@ import (
 func (c *Conn) processWrites() {
 	defer c.cleanupAfterWrites()
 
+	firstRequest := true
+	hasWritten := false
+
 	for {
 		if c.isClosed() {
 			return
@@ -23,6 +30,7 @@ func (c *Conn) processWrites() {
 
 		select {
 		case b := <-c.writeRequestsCh:
+			hasWritten = true
 			if !c.processWrite(b) {
 				// There was a problem processing a write, stop
 				return
@@ -30,16 +38,29 @@ func (c *Conn) processWrites() {
 		case <-c.stopWriteCh:
 			return
 		case <-time.After(c.Config.FlushTimeout):
+			// We waited more than FlushTimeout for a write, finish our request
+
 			if c.isIdle() {
 				// Connection is idle, stop writing
 				return
 			}
-			// We waited more than FlushTimeout for a write, finish our request
+
+			if firstRequest && !hasWritten {
+				// Write empty data just so that we can get a response and get
+				// on with reading.
+				// TODO: it might be more efficient to instead start by reading,
+				// but that's a fairly big structural change on client and
+				// server.
+				c.rs.write(emptyBytes)
+			}
+
 			err := c.rs.finishBody()
 			if err != nil {
 				c.writeResponsesCh <- rwResponse{0, err}
 				return
 			}
+
+			firstRequest = false
 		}
 	}
 }
