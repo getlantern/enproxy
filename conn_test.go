@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	. "gopkg.in/getlantern/waitforserver.v1"
 )
 
 const (
@@ -168,25 +170,8 @@ func startProxy(t *testing.T) {
 			t.Fatalf("Unable to listen and serve: %s", err)
 		}
 	}()
-	waitForServer(PROXY_ADDR, 1*time.Second, t)
-	proxyStarted = true
-}
-
-// waitForServer waits for a TCP server to start at the given address, waiting
-// up to the given limit and reporting an error to the given testing.T if the
-// server didn't start within the time limit.
-func waitForServer(addr string, limit time.Duration, t *testing.T) {
-	cutoff := time.Now().Add(limit)
-	for {
-		if time.Now().After(cutoff) {
-			t.Errorf("Server never came up at address %s", addr)
-			return
-		}
-		c, err := net.DialTimeout("tcp", addr, limit)
-		if err == nil {
-			c.Close()
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	if err := WaitForServer("tcp", PROXY_ADDR, 1*time.Second); err != nil {
+		t.Fatal(err)
 	}
+	proxyStarted = true
 }
