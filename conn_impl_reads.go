@@ -3,7 +3,6 @@ package enproxy
 import (
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"time"
 )
@@ -61,7 +60,7 @@ func (c *Conn) processReads() {
 				resp, err = c.doRequest(proxyConn, proxyHost, OP_READ, nil)
 				if err != nil {
 					err = mkerror("Unable to issue read request", err)
-					log.Println(err)
+					log.Error(err)
 					c.readResponsesCh <- rwResponse{0, err}
 					return
 				}
@@ -92,7 +91,7 @@ func (c *Conn) processReads() {
 					}
 					continue
 				} else {
-					log.Print("Error reading: %s", err)
+					log.Errorf("Error reading: %s", err)
 					return
 				}
 			}

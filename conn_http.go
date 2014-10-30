@@ -3,7 +3,6 @@ package enproxy
 import (
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"strconv"
@@ -49,7 +48,7 @@ func pipeData(clientConn net.Conn, connOut *Conn, req *http.Request) {
 	// Respond OK
 	err := respondOK(clientConn, req)
 	if err != nil {
-		log.Printf("Unable to respond OK: %s", err)
+		log.Errorf("Unable to respond OK: %s", err)
 		return
 	}
 

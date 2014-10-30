@@ -13,7 +13,7 @@ import (
 
 // Connect opens a connection to the proxy and starts processing writes and
 // reads to this Conn.
-func (c *Conn) Connect() (err error) {
+func (c *Conn) Connect() error {
 	c.id = uuid.NewRandom().String()
 
 	c.initDefaults()
@@ -23,9 +23,16 @@ func (c *Conn) Connect() (err error) {
 
 	go c.processWrites()
 	go c.processReads()
-	go c.processRequests()
 
-	return
+	// Dial proxy
+	proxyConn, err := c.dialProxy()
+	if err != nil {
+		return fmt.Errorf("Unable to dial proxy for POSTing request: %s", err)
+	}
+
+	go c.processRequests(proxyConn)
+
+	return nil
 }
 
 func (c *Conn) initDefaults() {
@@ -82,7 +89,9 @@ func (c *Conn) dialProxy() (*connInfo, error) {
 func (c *Conn) redialProxyIfNecessary(proxyConn *connInfo) (*connInfo, error) {
 	proxyConn.closedMutex.Lock()
 	defer proxyConn.closedMutex.Unlock()
-	if proxyConn.closed || proxyConn.conn.TimesOutIn() < oneSecond {
+	if proxyConn == nil {
+		return c.dialProxy()
+	} else if proxyConn.closed || proxyConn.conn.TimesOutIn() < oneSecond {
 		proxyConn.conn.Close()
 		return c.dialProxy()
 	} else {

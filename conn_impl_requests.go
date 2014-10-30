@@ -3,7 +3,6 @@ package enproxy
 import (
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"time"
 )
@@ -13,18 +12,12 @@ import (
 // deliver requests to the enproxy server in order. In-order delivery is
 // required because we are encapsulating a stream of data inside the bodies of
 // successive requests.
-func (c *Conn) processRequests() {
+func (c *Conn) processRequests(proxyConn *connInfo) {
 	var resp *http.Response
 
 	first := true
 	defer c.cleanupAfterRequests(resp, first)
 
-	// Dial proxy
-	proxyConn, err := c.dialProxy()
-	if err != nil {
-		log.Printf("Unable to dial proxy for POSTing request: %s", err)
-		return
-	}
 	defer func() {
 		// If there's a proxyConn at the time that processRequests() exits,
 		// close it.
@@ -33,6 +26,7 @@ func (c *Conn) processRequests() {
 		}
 	}()
 
+	var err error
 	var proxyHost string
 
 	mkerror := func(text string, err error) error {
@@ -49,7 +43,7 @@ func (c *Conn) processRequests() {
 			proxyConn, err = c.redialProxyIfNecessary(proxyConn)
 			if err != nil {
 				err = mkerror("Unable to redial proxy", err)
-				log.Println(err)
+				log.Error(err)
 				if first {
 					c.initialResponseCh <- hostWithResponse{err: err}
 				}
@@ -61,7 +55,7 @@ func (c *Conn) processRequests() {
 			c.requestFinishedCh <- err
 			if err != nil {
 				err = mkerror("Unable to issue write request", err)
-				log.Println(err.Error())
+				log.Error(err)
 				if first {
 					c.initialResponseCh <- hostWithResponse{err: err}
 				}
@@ -89,7 +83,7 @@ func (c *Conn) processRequests() {
 				proxyConn, err = c.dialProxy()
 				if err != nil {
 					err = mkerror("Unable to dial proxy for 2nd request", err)
-					log.Println(err)
+					log.Error(err)
 					return
 				}
 			} else {
