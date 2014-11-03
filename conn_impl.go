@@ -27,7 +27,7 @@ func (c *Conn) Connect() error {
 	// Dial proxy
 	proxyConn, err := c.dialProxy()
 	if err != nil {
-		return fmt.Errorf("Unable to dial proxy for POSTing request: %s", err)
+		return fmt.Errorf("Unable to dial proxy: %s", err)
 	}
 
 	go c.processRequests(proxyConn)
