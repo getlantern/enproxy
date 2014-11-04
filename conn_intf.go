@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/getlantern/golog"
 	"github.com/getlantern/idletiming"
 )
 
@@ -20,6 +21,10 @@ const (
 
 	OP_WRITE = "write"
 	OP_READ  = "read"
+)
+
+var (
+	log = golog.LoggerFor("enproxy")
 )
 
 var (

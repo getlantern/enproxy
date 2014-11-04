@@ -44,10 +44,21 @@ func TestTLSBuffered(t *testing.T) {
 	doTestTLS(true, t)
 }
 
+func TestBadStreaming(t *testing.T) {
+	doTestBad(false, t)
+}
+
+func TestBadBuffered(t *testing.T) {
+	doTestBad(true, t)
+}
+
 func doTestPlainText(buffered bool, t *testing.T) {
 	startProxy(t)
 
-	conn := prepareConn(80, buffered, t)
+	conn, err := prepareConn(80, buffered, false, t)
+	if err != nil {
+		t.Fatalf("Unable to prepareConn: %s", err)
+	}
 	defer conn.Close()
 
 	doRequests(conn, t)
@@ -63,14 +74,17 @@ func doTestPlainText(buffered bool, t *testing.T) {
 func doTestTLS(buffered bool, t *testing.T) {
 	startProxy(t)
 
-	conn := prepareConn(443, buffered, t)
+	conn, err := prepareConn(443, buffered, false, t)
+	if err != nil {
+		t.Fatalf("Unable to prepareConn: %s", err)
+	}
 
 	tlsConn := tls.Client(conn, &tls.Config{
 		ServerName: "www.google.com",
 	})
 	defer tlsConn.Close()
 
-	err := tlsConn.Handshake()
+	err = tlsConn.Handshake()
 	if err != nil {
 		t.Fatalf("Unable to handshake: %s", err)
 	}
@@ -85,13 +99,27 @@ func doTestTLS(buffered bool, t *testing.T) {
 	}
 }
 
-func prepareConn(port int, buffered bool, t *testing.T) (conn *Conn) {
+func doTestBad(buffered bool, t *testing.T) {
+	startProxy(t)
+
+	conn, err := prepareConn(80, buffered, true, t)
+	if err == nil {
+		defer conn.Close()
+		t.Error("Bad conn should have returned error on Connect()")
+	}
+}
+
+func prepareConn(port int, buffered bool, fail bool, t *testing.T) (conn *Conn, err error) {
 	addr := fmt.Sprintf("%s:%d", "www.google.com", port)
 	conn = &Conn{
 		Addr: addr,
 		Config: &Config{
 			DialProxy: func(addr string) (net.Conn, error) {
-				return net.Dial("tcp", PROXY_ADDR)
+				proto := "tcp"
+				if fail {
+					proto = "fakebad"
+				}
+				return net.Dial(proto, PROXY_ADDR)
 			},
 			NewRequest: func(host string, method string, body io.Reader) (req *http.Request, err error) {
 				if host == "" {
@@ -102,7 +130,7 @@ func prepareConn(port int, buffered bool, t *testing.T) (conn *Conn) {
 			BufferRequests: buffered,
 		},
 	}
-	conn.Connect()
+	err = conn.Connect()
 	return
 }
 

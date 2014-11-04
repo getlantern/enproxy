@@ -3,7 +3,6 @@ package enproxy
 import (
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -212,7 +211,7 @@ func (p *Proxy) handleRead(resp http.ResponseWriter, req *http.Request, lc *lazy
 			bytesInBatch = bytesInBatch + n
 			_, writeErr := resp.Write(b[:n])
 			if writeErr != nil {
-				log.Printf("Error writing to response: %s", writeErr)
+				log.Errorf("Error writing to response: %s", writeErr)
 				connOut.Close()
 				return
 			}
@@ -244,7 +243,7 @@ func (p *Proxy) handleRead(resp http.ResponseWriter, req *http.Request, lc *lazy
 				if readErr == io.EOF {
 					lc.hitEOF = true
 				} else {
-					log.Printf("Unexpected error reading from upstream: %s", readErr)
+					log.Errorf("Unexpected error reading from upstream: %s", readErr)
 					// TODO: probably want to close connOut right away
 				}
 				return
@@ -292,6 +291,6 @@ func clientIpFor(req *http.Request) string {
 }
 
 func badGateway(resp http.ResponseWriter, msg string) {
-	log.Printf("Responding Bad Gateway: %s", msg)
+	log.Errorf("Responding Bad Gateway: %s", msg)
 	resp.WriteHeader(BAD_GATEWAY)
 }
