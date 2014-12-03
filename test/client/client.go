@@ -13,7 +13,7 @@ import (
 
 func main() {
 	enproxyConfig := &enproxy.Config{
-		DialProxy: func(addr string) (net.Conn, error) {
+		DialProxy: func() (net.Conn, error) {
 			return net.Dial("tcp", os.Args[2])
 		},
 		NewRequest: func(host string, method string, body io.Reader) (req *http.Request, err error) {
