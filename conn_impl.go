@@ -70,7 +70,7 @@ func (c *Conn) initRequestStrategy() {
 }
 
 func (c *Conn) dialProxy() (*connInfo, error) {
-	conn, err := c.Config.DialProxy(c.Addr)
+	conn, err := c.Config.DialProxy()
 	if err != nil {
 		return nil, fmt.Errorf("Unable to dial proxy: %s", err)
 	}

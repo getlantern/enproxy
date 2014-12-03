@@ -114,7 +114,7 @@ func prepareConn(port int, buffered bool, fail bool, t *testing.T) (conn *Conn, 
 	conn = &Conn{
 		Addr: addr,
 		Config: &Config{
-			DialProxy: func(addr string) (net.Conn, error) {
+			DialProxy: func() (net.Conn, error) {
 				proto := "tcp"
 				if fail {
 					proto = "fakebad"

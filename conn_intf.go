@@ -133,7 +133,7 @@ type Conn struct {
 // Config configures a Conn
 type Config struct {
 	// DialProxy: function to open a connection to the proxy
-	DialProxy dialFunc
+	DialProxy func() (net.Conn, error)
 
 	// NewRequest: function to create a new request to the proxy
 	NewRequest newRequestFunc
