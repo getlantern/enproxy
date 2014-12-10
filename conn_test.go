@@ -173,7 +173,7 @@ func readResponse(conn net.Conn, req *http.Request, t *testing.T) {
 	}
 	text := string(buff.Bytes())
 	if !strings.Contains(text, EXPECTED_TEXT) {
-		t.Errorf("Resulting string did not contain expected text.\nExpected:\n%s\n%s\nReceived:\n%s", EXPECTED_TEXT, HR, text, HR)
+		t.Errorf("Resulting string did not contain expected text.\nExpected:\n%s\n%s\nReceived:\n%s", EXPECTED_TEXT, HR, text)
 	}
 }
 
@@ -187,10 +187,10 @@ func startProxy(t *testing.T) {
 	go func() {
 		proxy := &Proxy{
 			OnBytesReceived: func(clientIp string, bytes int64) {
-				bytesReceived = atomic.AddInt64(&bytesReceived, bytes)
+				atomic.AddInt64(&bytesReceived, bytes)
 			},
 			OnBytesSent: func(clientIp string, bytes int64) {
-				bytesSent = atomic.AddInt64(&bytesSent, bytes)
+				atomic.AddInt64(&bytesSent, bytes)
 			},
 		}
 		err := proxy.ListenAndServe(PROXY_ADDR)

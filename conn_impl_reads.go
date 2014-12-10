@@ -103,7 +103,6 @@ func (c *Conn) processReads() {
 			}
 		}
 	}
-	return
 }
 
 // submitRead submits a read to the processReads goroutine, returning true if
