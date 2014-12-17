@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	. "gopkg.in/getlantern/waitforserver.v1"
+	. "github.com/getlantern/waitforserver"
 )
 
 const (
