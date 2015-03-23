@@ -2,10 +2,12 @@ enproxy [![Travis CI Status](https://travis-ci.org/getlantern/enproxy.svg?branch
 ==========
 
 enproxy provides an implementation of net.Conn that sends and receives data to/
-from a proxy using HTTP request/response pairs that encapsulate the data.  This
+from a proxy using HTTP request/response pairs that encapsulate the data. This
 is useful when you need to tunnel arbitrary protocols over an HTTP proxy that
 doesn't support HTTP CONNECT.  Content distribution networks are one example of
-such a proxy.
+such a proxy. The protocol is diagramed at:
+
+http://getlantern.github.io/Beating_GFW_With_Go/#/fullduplexpic 
 
 To open such a connection:
 
