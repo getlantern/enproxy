@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"net/http/httputil"
 
-	"code.google.com/p/go-uuid/uuid"
 	"github.com/getlantern/idletiming"
+	"github.com/pborman/uuid"
 )
 
 // Dial creates a Conn, opens a connection to the proxy and starts processing
